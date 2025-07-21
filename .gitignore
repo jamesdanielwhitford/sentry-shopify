@@ -1,0 +1,37 @@
+# macOS system files
+.DS_Store
+
+# VS Code settings
+.vscode/
+*.code-workspace
+
+# Node modules (if you add tooling later)
+node_modules/
+dist/
+build/
+*.log
+
+# Environment & config
+.env
+.env.*  # for multiple environments
+shopify.theme.toml  # Optional: contains theme ID/store info (don't track this if per-dev)
+
+# OS-specific
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+Icon?
+
+# Temporary or backup files
+*.bak
+*.swp
+*.tmp
+*.zip
+*.tar.gz
+
+# Git conflicts or merge leftovers
+*.orig
+*.rej
+
+# Misc
+.idea/  # JetBrains IDEs
