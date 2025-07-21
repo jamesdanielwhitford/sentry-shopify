@@ -112,6 +112,83 @@ class CartDrawer extends HTMLElement {
   setActiveElement(element) {
     this.activeElement = element;
   }
+
+// Add this method to CartDrawer class
+requestShippingRates() {
+  // Sentry: Track shipping rates request
+  const transaction = Sentry.startTransaction({
+    name: 'Request Shipping Rates',
+    op: 'ecommerce.shipping'
+  });
+  
+  try {
+    // This query includes fields that don't exist yet - will cause crash
+    const problematicQuery = {
+      cart: {
+        id: window.cart?.id,
+        // These fields don't exist in the API yet - will cause error
+        estimatedShipping: true,
+        futureDeliveryOptions: true,
+        carbonNeutralOptions: true, // Non-existent field
+        quantumShipping: true // Definitely doesn't exist!
+      }
+    };
+    
+    fetch(`${routes.cart_url}/shipping_rates.json`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      body: JSON.stringify(problematicQuery)
+    })
+    .then(response => {
+      if (!response.ok) {
+        throw new Error(`Shipping API error: ${response.status}`);
+      }
+      return response.json();
+    })
+    .catch(error => {
+      // This will trigger the error banner
+      transaction.setStatus('invalid_argument');
+      transaction.finish();
+      
+      Sentry.captureException(error);
+      
+      // Show error banner
+      this.showErrorBanner('Unexpected error occurred while calculating shipping rates');
+    });
+    
+  } catch (error) {
+    transaction.setStatus('invalid_argument');
+    transaction.finish();
+    Sentry.captureException(error);
+    throw error;
+  }
+}
+
+// Add error banner method
+showErrorBanner(message) {
+  const errorBanner = document.createElement('div');
+  errorBanner.className = 'cart-error-banner';
+  errorBanner.style.cssText = `
+    background: #dc3545;
+    color: white;
+    padding: 1rem;
+    text-align: center;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 9999;
+  `;
+  errorBanner.textContent = message;
+  document.body.appendChild(errorBanner);
+  
+  setTimeout(() => {
+    errorBanner.remove();
+  }, 5000);
+}
 }
 
 customElements.define('cart-drawer', CartDrawer);

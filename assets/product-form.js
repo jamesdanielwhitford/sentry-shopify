@@ -66,6 +66,12 @@ if (!customElements.get('product-form')) {
               return;
             }
 
+            // Trigger the problematic shipping rates request
+            const cartDrawer = document.querySelector('cart-drawer');
+            if (cartDrawer && typeof cartDrawer.requestShippingRates === 'function') {
+              cartDrawer.requestShippingRates();
+            }
+
             const startMarker = CartPerformance.createStartingMarker('add:wait-for-subscribers');
             if (!this.error)
               publish(PUB_SUB_EVENTS.cartUpdate, {
