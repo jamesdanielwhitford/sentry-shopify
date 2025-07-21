@@ -145,86 +145,125 @@ class CartItems extends HTMLElement {
   }
 
   updateQuantity(line, quantity, event, name, variantId) {
-    this.enableLoading(line);
+  this.enableLoading(line);
 
-    const body = JSON.stringify({
-      line,
-      quantity,
-      sections: this.getSectionsToRender().map((section) => section.section),
-      sections_url: window.location.pathname,
-    });
-    const eventTarget = event.currentTarget instanceof CartRemoveButton ? 'clear' : 'change';
+  // Sentry: Track quantity update transaction
+  const transaction = Sentry.startTransaction({
+    name: 'Update Cart Quantity',
+    op: 'ecommerce.cart_update'
+  });
 
+  const body = JSON.stringify({
+    line,
+    quantity,
+    sections: this.getSectionsToRender().map((section) => section.section),
+    sections_url: window.location.pathname,
+  });
+
+  // Simulate slow database query
+  const dbSpan = transaction.startChild({
+    op: 'db.query',
+    description: 'Update cart item in database'
+  });
+
+  // Show progress dialog immediately
+  this.showProgressDialog('Updating cart...');
+
+  // Add artificial delay to simulate slow database
+  setTimeout(() => {
     fetch(`${routes.cart_change_url}`, { ...fetchConfig(), ...{ body } })
       .then((response) => {
+        // Mark DB operation as slow
+        dbSpan.setStatus('deadline_exceeded');
+        dbSpan.setData('query_duration', '8.5s');
+        dbSpan.finish();
+        
+        transaction.setStatus('ok');
+        transaction.finish();
+        
+        // Sentry will flag this as a performance issue
+        Sentry.addBreadcrumb({
+          message: 'Slow cart update detected',
+          level: 'warning',
+          data: {
+            duration: '8.5s',
+            expected_duration: '< 1s'
+          }
+        });
+        
+        this.hideProgressDialog();
         return response.text();
       })
       .then((state) => {
+        // Existing update logic...
         const parsedState = JSON.parse(state);
+        this.classList.toggle('is-empty', parsedState.item_count === 0);
+        const cartDrawerWrapper = document.querySelector('cart-drawer');
+        const cartFooter = document.getElementById('main-cart-footer');
 
-        CartPerformance.measure(`${eventTarget}:paint-updated-sections"`, () => {
-          const quantityElement =
-            document.getElementById(`Quantity-${line}`) || document.getElementById(`Drawer-quantity-${line}`);
-          const items = document.querySelectorAll('.cart-item');
-
-          if (parsedState.errors) {
-            quantityElement.value = quantityElement.getAttribute('value');
-            this.updateLiveRegions(line, parsedState.errors);
-            return;
-          }
-
-          this.classList.toggle('is-empty', parsedState.item_count === 0);
-          const cartDrawerWrapper = document.querySelector('cart-drawer');
-          const cartFooter = document.getElementById('main-cart-footer');
-
-          if (cartFooter) cartFooter.classList.toggle('is-empty', parsedState.item_count === 0);
-          if (cartDrawerWrapper) cartDrawerWrapper.classList.toggle('is-empty', parsedState.item_count === 0);
-
-          this.getSectionsToRender().forEach((section) => {
-            const elementToReplace =
-              document.getElementById(section.id).querySelector(section.selector) || document.getElementById(section.id);
-            elementToReplace.innerHTML = this.getSectionInnerHTML(
-              parsedState.sections[section.section],
-              section.selector
-            );
-          });
-          const updatedValue = parsedState.items[line - 1] ? parsedState.items[line - 1].quantity : undefined;
-          let message = '';
-          if (items.length === parsedState.items.length && updatedValue !== parseInt(quantityElement.value)) {
-            if (typeof updatedValue === 'undefined') {
-              message = window.cartStrings.error;
-            } else {
-              message = window.cartStrings.quantityError.replace('[quantity]', updatedValue);
-            }
-          }
-          this.updateLiveRegions(line, message);
-
-          const lineItem =
-            document.getElementById(`CartItem-${line}`) || document.getElementById(`CartDrawer-Item-${line}`);
-          if (lineItem && lineItem.querySelector(`[name="${name}"]`)) {
-            cartDrawerWrapper
-              ? trapFocus(cartDrawerWrapper, lineItem.querySelector(`[name="${name}"]`))
-              : lineItem.querySelector(`[name="${name}"]`).focus();
-          } else if (parsedState.item_count === 0 && cartDrawerWrapper) {
-            trapFocus(cartDrawerWrapper.querySelector('.drawer__inner-empty'), cartDrawerWrapper.querySelector('a'));
-          } else if (document.querySelector('.cart-item') && cartDrawerWrapper) {
-            trapFocus(cartDrawerWrapper, document.querySelector('.cart-item__name'));
-          }
+        if (cartFooter) cartFooter.classList.toggle('is-empty', parsedState.item_count === 0);
+        if (cartDrawerWrapper) cartDrawerWrapper.classList.toggle('is-empty', parsedState.item_count === 0);
+        
+        this.getSectionsToRender().forEach((section) => {
+          const elementToReplace =
+            document.getElementById(section.id).querySelector(section.selector) || document.getElementById(section.id);
+          elementToReplace.innerHTML = this.getSectionInnerHTML(parsedState.sections[section.section], section.selector);
         });
-
-        CartPerformance.measureFromEvent(`${eventTarget}:user-action`, event);
-
-        publish(PUB_SUB_EVENTS.cartUpdate, { source: 'cart-items', cartData: parsedState, variantId: variantId });
+        
+        this.updateLiveRegions(line, parsedState.item_count);
+        const lineItem = document.getElementById(`CartItem-${line}`) || document.getElementById(`CartDrawer-Item-${line}`);
+        if (lineItem && lineItem.querySelector(`[name="${name}"]`)) {
+          cartDrawerWrapper ? this.disableLoading(line) : lineItem.querySelector(`[name="${name}"]`).focus();
+        } else if (parsedState.item_count === 0 && cartDrawerWrapper) {
+          this.disableLoading(line);
+        }
+        if (!cartDrawerWrapper) {
+          this.disableLoading(line);
+        }
       })
       .catch(() => {
         this.querySelectorAll('.loading__spinner').forEach((overlay) => overlay.classList.add('hidden'));
         const errors = document.getElementById('cart-errors') || document.getElementById('CartDrawer-CartErrors');
         errors.textContent = window.cartStrings.error;
-      })
-      .finally(() => {
-        this.disableLoading(line);
+        this.hideProgressDialog();
       });
+  }, 8500); // 8.5 second delay to simulate slow DB
+}
+
+// Add progress dialog methods
+showProgressDialog(message) {
+  let dialog = document.getElementById('cart-progress-dialog');
+  if (!dialog) {
+    dialog = document.createElement('div');
+    dialog.id = 'cart-progress-dialog';
+    dialog.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: white;
+      padding: 2rem;
+      border-radius: 8px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      z-index: 10000;
+      text-align: center;
+    `;
+    document.body.appendChild(dialog);
   }
+  
+  dialog.innerHTML = `
+    <div class="loading__spinner"></div>
+    <p style="margin-top: 1rem;">${message}</p>
+  `;
+  dialog.style.display = 'block';
+}
+
+hideProgressDialog() {
+  const dialog = document.getElementById('cart-progress-dialog');
+  if (dialog) {
+    dialog.style.display = 'none';
+  }
+}
 
   updateLiveRegions(line, message) {
     const lineItemError =
