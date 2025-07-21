@@ -1,0 +1,60 @@
+<div class="page-width section-{{ section.id }}-padding">
+  <div id="thank-you-content">
+    <h2>Thank you for your purchase!</h2>
+    <p>Processing your order confirmation...</p>
+    <div class="loading__spinner"></div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // Sentry: Track page load transaction
+  const transaction = Sentry.startTransaction({
+    name: 'Thank You Page Load',
+    op: 'pageload'
+  });
+  
+  // Simulate problematic third-party upsell script
+  const upsellSpan = transaction.startChild({
+    op: 'third-party.upsell',
+    description: 'Load post-purchase upsell widget'
+  });
+  
+  // Create a massive 1MB+ JavaScript string to block the main thread
+  let massiveString = '';
+  for (let i = 0; i < 100000; i++) {
+    massiveString += 'This is a large string that will consume memory and block the main thread. ';
+  }
+  
+  // Block the main thread with synchronous processing
+  const startTime = performance.now();
+  while (performance.now() - startTime < 3000) {
+    // Busy wait to block the main thread for 3 seconds
+    JSON.parse(JSON.stringify(massiveString.substring(0, 1000)));
+  }
+  
+  upsellSpan.setStatus('resource_exhausted');
+  upsellSpan.finish();
+  
+  transaction.setStatus('cancelled');
+  transaction.finish();
+  
+  // Sentry will capture this performance issue
+  Sentry.captureException(new Error('Thank you page blocked by 1MB third-party upsell script'));
+  
+  // Eventually show the actual content (after the blocking)
+  setTimeout(() => {
+    document.getElementById('thank-you-content').innerHTML = `
+      <h2>Order Confirmed!</h2>
+      <p>Your order has been processed successfully.</p>
+    `;
+  }, 100);
+});
+</script>
+
+{% schema %}
+{
+  "name": "Upsell Blocker",
+  "settings": []
+}
+{% endschema %}
