@@ -176,36 +176,46 @@ class PredictiveSearch extends SearchForm {
       return;
     }
 
-    fetch(`${routes.predictive_search_url}?q=${encodeURIComponent(searchTerm)}&section_id=predictive-search`, {
-      signal: this.abortController.signal,
-    })
-      .then((response) => {
-        if (!response.ok) {
-          var error = new Error(response.status);
+    // Add this at the beginning of the search function that makes API calls
+    console.log('Search initiated for:', searchTerm);
+
+    // Add artificial delay before the existing fetch call
+    setTimeout(() => {
+      fetch(`${routes.predictive_search_url}?q=${encodeURIComponent(searchTerm)}&section_id=predictive-search`, {
+        signal: this.abortController.signal,
+      })
+        .then((response) => {
+          if (!response.ok) {
+            var error = new Error(response.status);
+            this.close();
+            throw error;
+          }
+
+          return response.text();
+        })
+        .then((text) => {
+          const resultsMarkup = new DOMParser()
+            .parseFromString(text, 'text/html')
+            .querySelector('#shopify-section-predictive-search').innerHTML;
+          // Save bandwidth keeping the cache in all instances synced
+          this.allPredictiveSearchInstances.forEach((predictiveSearchInstance) => {
+            predictiveSearchInstance.cachedResults[queryKey] = resultsMarkup;
+          });
+          this.renderSearchResults(resultsMarkup);
+        })
+        .catch((error) => {
+          if (error?.code === 20) {
+            // Code 20 means the call was aborted
+            return;
+          }
+          // Capture slow search with Sentry
+          if (typeof Sentry !== 'undefined') {
+            Sentry.captureException(new Error('Search autocomplete took 8+ seconds - slow search API'));
+          }
           this.close();
           throw error;
-        }
-
-        return response.text();
-      })
-      .then((text) => {
-        const resultsMarkup = new DOMParser()
-          .parseFromString(text, 'text/html')
-          .querySelector('#shopify-section-predictive-search').innerHTML;
-        // Save bandwidth keeping the cache in all instances synced
-        this.allPredictiveSearchInstances.forEach((predictiveSearchInstance) => {
-          predictiveSearchInstance.cachedResults[queryKey] = resultsMarkup;
         });
-        this.renderSearchResults(resultsMarkup);
-      })
-      .catch((error) => {
-        if (error?.code === 20) {
-          // Code 20 means the call was aborted
-          return;
-        }
-        this.close();
-        throw error;
-      });
+    }, 8000);
   }
 
   setLiveRegionLoadingState() {
