@@ -147,23 +147,11 @@ class CartItems extends HTMLElement {
   updateQuantity(line, quantity, event, name, variantId) {
   this.enableLoading(line);
 
-  // Sentry: Track quantity update transaction
-  const transaction = Sentry.startTransaction({
-    name: 'Update Cart Quantity',
-    op: 'ecommerce.cart_update'
-  });
-
   const body = JSON.stringify({
     line,
     quantity,
     sections: this.getSectionsToRender().map((section) => section.section),
     sections_url: window.location.pathname,
-  });
-
-  // Simulate slow database query
-  const dbSpan = transaction.startChild({
-    op: 'db.query',
-    description: 'Update cart item in database'
   });
 
   // Show progress dialog immediately
@@ -173,23 +161,18 @@ class CartItems extends HTMLElement {
   setTimeout(() => {
     fetch(`${routes.cart_change_url}`, { ...fetchConfig(), ...{ body } })
       .then((response) => {
-        // Mark DB operation as slow
-        dbSpan.setStatus('deadline_exceeded');
-        dbSpan.setData('query_duration', '8.5s');
-        dbSpan.finish();
-        
-        transaction.setStatus('ok');
-        transaction.finish();
-        
-        // Sentry will flag this as a performance issue
-        Sentry.addBreadcrumb({
-          message: 'Slow cart update detected',
-          level: 'warning',
-          data: {
-            duration: '8.5s',
-            expected_duration: '< 1s'
-          }
-        });
+        // Capture slow database operation with Sentry
+        if (typeof Sentry !== 'undefined') {
+          Sentry.addBreadcrumb({
+            message: 'Slow cart update detected',
+            level: 'warning',
+            data: {
+              duration: '8.5s',
+              expected_duration: '< 1s'
+            }
+          });
+          Sentry.captureException(new Error('Cart update took 8.5 seconds - slow database query'));
+        }
         
         this.hideProgressDialog();
         return response.text();
