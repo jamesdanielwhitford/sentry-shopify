@@ -135,29 +135,12 @@ document.addEventListener('DOMContentLoaded', function() {
       spinner.style.display = 'inline-block';
       buttonText.textContent = 'Calculating shipping...';
       
-      // Sentry: Start transaction for checkout process
-      const transaction = Sentry.startTransaction({
-        name: 'Checkout Process',
-        op: 'ecommerce.checkout'
-      });
-      
-      // Simulate the problematic shipping rates API call
-      const shippingSpan = transaction.startChild({
-        op: 'shipping.calculate',
-        description: 'Calculate shipping rates'
-      });
-      
       // This will hang for 12+ seconds (the problematic scenario)
       setTimeout(() => {
-        // This timeout simulates the API hanging
-        shippingSpan.setStatus('deadline_exceeded');
-        shippingSpan.finish();
-        
-        transaction.setStatus('cancelled');
-        transaction.finish();
-        
-        // Sentry will capture this as a performance issue
-        Sentry.captureException(new Error('Shipping rates API timeout after 12 seconds'));
+        // Just capture the error with Sentry (simpler approach)
+        if (typeof Sentry !== 'undefined') {
+          Sentry.captureException(new Error('Shipping rates API timeout after 12 seconds'));
+        }
         
         // Show error state
         checkoutBtn.disabled = false;
