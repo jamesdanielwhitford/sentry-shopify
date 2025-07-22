@@ -451,6 +451,21 @@
   </div>
 </cart-items>
 
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  // Trigger shipping error when any "Add to Cart" happens on product pages
+  if (window.location.pathname.includes('/cart') && document.querySelector('cart-items')) {
+    // Simulate the crash after a short delay
+    setTimeout(() => {
+      const cartItems = document.querySelector('cart-items');
+      if (cartItems && typeof cartItems.simulateShippingRatesError === 'function') {
+        cartItems.simulateShippingRatesError();
+      }
+    }, 2000);
+  }
+});
+</script>
+
 {% schema %}
 {
   "name": "t:sections.main-cart-items.name",

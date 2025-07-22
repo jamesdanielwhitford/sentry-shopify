@@ -308,6 +308,34 @@ hideProgressDialog() {
     cartItemElements.forEach((overlay) => overlay.classList.add('hidden'));
     cartDrawerItemElements.forEach((overlay) => overlay.classList.add('hidden'));
   }
+
+  // Add cart crash simulation method
+  simulateShippingRatesError() {
+    if (typeof Sentry !== 'undefined') {
+      Sentry.captureException(new Error('Cart query included fields not yet available: carbonNeutralOptions, quantumShipping'));
+    }
+    
+    // Show error banner
+    const errorBanner = document.createElement('div');
+    errorBanner.className = 'cart-error-banner';
+    errorBanner.style.cssText = `
+      background: #dc3545;
+      color: white;
+      padding: 1rem;
+      text-align: center;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 9999;
+    `;
+    errorBanner.textContent = 'Unexpected error occurred while calculating shipping rates';
+    document.body.appendChild(errorBanner);
+    
+    setTimeout(() => {
+      errorBanner.remove();
+    }, 5000);
+  }
 }
 
 customElements.define('cart-items', CartItems);
