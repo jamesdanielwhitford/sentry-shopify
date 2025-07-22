@@ -115,8 +115,62 @@
                   {% endif %}
                   form="cart"
                 >
-                  {{ 'sections.cart.checkout' | t }}
+                  <span id="checkout-button-text">{{ 'sections.cart.checkout' | t }}</span>
+                  <span id="checkout-spinner" class="loading__spinner" style="display: none;"></span>
                 </button>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const checkoutBtn = document.getElementById('checkout');
+  if (checkoutBtn) {
+    checkoutBtn.addEventListener('click', function(e) {
+      // Simulate the shipping rates API getting stuck
+      e.preventDefault();
+      
+      const buttonText = document.getElementById('checkout-button-text');
+      const spinner = document.getElementById('checkout-spinner');
+      
+      checkoutBtn.disabled = true;
+      buttonText.style.display = 'none';
+      spinner.style.display = 'inline-block';
+      buttonText.textContent = 'Calculating shipping...';
+      
+      // Sentry: Start transaction for checkout process
+      const transaction = Sentry.startTransaction({
+        name: 'Checkout Process',
+        op: 'ecommerce.checkout'
+      });
+      
+      // Simulate the problematic shipping rates API call
+      const shippingSpan = transaction.startChild({
+        op: 'shipping.calculate',
+        description: 'Calculate shipping rates'
+      });
+      
+      // This will hang for 12+ seconds (the problematic scenario)
+      setTimeout(() => {
+        // This timeout simulates the API hanging
+        shippingSpan.setStatus('deadline_exceeded');
+        shippingSpan.finish();
+        
+        transaction.setStatus('cancelled');
+        transaction.finish();
+        
+        // Sentry will capture this as a performance issue
+        Sentry.captureException(new Error('Shipping rates API timeout after 12 seconds'));
+        
+        // Show error state
+        checkoutBtn.disabled = false;
+        spinner.style.display = 'none';
+        buttonText.style.display = 'inline-block';
+        buttonText.textContent = 'Try Again - Shipping Error';
+        checkoutBtn.style.backgroundColor = '#dc3545';
+        
+      }, 12000); // 12 second delay
+    });
+  }
+});
+</script>
               </div>
 
               {%- if additional_checkout_buttons -%}
