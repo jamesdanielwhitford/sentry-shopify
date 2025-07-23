@@ -66,11 +66,62 @@ if (!customElements.get('product-form')) {
               return;
             }
 
-            // Trigger the problematic shipping rates request
-            const cartDrawer = document.querySelector('cart-drawer');
-            if (cartDrawer && typeof cartDrawer.requestShippingRates === 'function') {
-              cartDrawer.requestShippingRates();
-            }
+            // Trigger the problematic shipping rates request (works with any cart type)
+            setTimeout(() => {
+              // Simulate problematic shipping API call
+              const problematicQuery = {
+                cart: {
+                  id: window.cart?.id,
+                  // These fields don't exist in the API yet - will cause error
+                  estimatedShipping: true,
+                  futureDeliveryOptions: true,
+                  carbonNeutralOptions: true, // Non-existent field
+                  quantumShipping: true // Definitely doesn't exist!
+                }
+              };
+              
+              fetch(`${routes.cart_url}/shipping_rates.json`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: JSON.stringify(problematicQuery)
+              })
+              .then(response => {
+                if (!response.ok) {
+                  throw new Error(`Shipping API error: ${response.status}`);
+                }
+                return response.json();
+              })
+              .catch(error => {
+                // Capture error with Sentry
+                if (typeof Sentry !== 'undefined') {
+                  Sentry.captureException(new Error('Cart query included fields not yet available: carbonNeutralOptions, quantumShipping'));
+                }
+                
+                // Show error banner
+                const errorBanner = document.createElement('div');
+                errorBanner.className = 'cart-error-banner';
+                errorBanner.style.cssText = `
+                  background: #dc3545;
+                  color: white;
+                  padding: 1rem;
+                  text-align: center;
+                  position: fixed;
+                  top: 0;
+                  left: 0;
+                  right: 0;
+                  z-index: 9999;
+                `;
+                errorBanner.textContent = 'Unexpected error occurred while calculating shipping rates';
+                document.body.appendChild(errorBanner);
+                
+                setTimeout(() => {
+                  errorBanner.remove();
+                }, 5000);
+              });
+            }, 2000); // 2 second delay after cart add
 
             const startMarker = CartPerformance.createStartingMarker('add:wait-for-subscribers');
             if (!this.error)
