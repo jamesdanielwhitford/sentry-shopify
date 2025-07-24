@@ -10,6 +10,10 @@ Session replay captures and recreates user interactions on your website, creatin
 
 The advantages of replay become clear when combined with performance monitoring and error tracking. A slow API call might show up in your performance metrics, but session replay shows you how users react to that slowness. Modern rum session replay tools also respect user privacy by automatically masking sensitive information like payment details and personal data.
 
+# Setting up a Sentry Project
+
+dsn: "https://your-dsn@your-org.ingest.sentry.io/your-project-id"
+
 ## Setting up comprehensive monitoring in your Shopify environment
 
 We'll demonstrate Sentry's unified monitoring capabilities using a Shopify store with realistic ecommerce functionality. This setup process shows you how to integrate [session replay](https://sentry.io/product/session-replay/) with performance monitoring and error tracking while capturing the context needed for effective debugging.
