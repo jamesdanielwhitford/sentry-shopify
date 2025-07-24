@@ -25,6 +25,53 @@
     {%- render 'meta-tags' -%}
     {%- render 'fonts' -%}
     {%- render 'scripts' -%}
+<script src="https://js.sentry-cdn.com/e2ac19e8552de63877c49774a0d915f6.min.js" crossorigin="anonymous"></script>
+<script>
+  Sentry.onLoad(function() {
+    Sentry.init({
+      initialScope: {
+        tags: {
+          store: "{{ shop.name }}",
+          page_type: "{{ template.name }}"
+        },
+        user: {
+          {% if customer %}
+            id: "{{ customer.id }}",
+            email: "{{ customer.email }}",
+          {% endif %}
+        },
+        contexts: {
+          page: {
+            template: "{{ template.name }}",
+            url: "{{ canonical_url }}"
+          }
+        }
+      },
+      tracesSampleRate: 1.0,
+      replaysSessionSampleRate: 1.0,
+      replaysOnErrorSampleRate: 1.0,
+      beforeSend(event) {
+        if (typeof window !== 'undefined' && window.cart) {
+          event.contexts = event.contexts || {};
+          event.contexts.cart = {
+            item_count: window.cart.item_count || 0,
+            total_price: window.cart.total_price || 0,
+            currency: "{{ cart.currency.iso_code }}"
+          };
+        }
+        return event;
+      }
+    });
+    
+    document.addEventListener('DOMContentLoaded', function() {
+      Sentry.setTag('cart_items', {{ cart.item_count }});
+      Sentry.setContext('store_info', {
+        currency: "{{ cart.currency.iso_code }}",
+        locale: "{{ request.locale.iso_code }}"
+      });
+    });
+  });
+</script>
     {%- render 'theme-styles-variables' -%}
     {%- render 'color-schemes' -%}
 
