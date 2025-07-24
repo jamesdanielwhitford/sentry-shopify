@@ -86,7 +86,7 @@ Replace `YOUR_DSN_HERE` with your actual Sentry project DSN. This configuration 
 
 Our first scenario demonstrates how session replay technology reveals user behavior patterns that traditional monitoring completely misses. When checkout processes hang due to slow external APIs, users exhibit specific frustration behaviors that session replay captures in detail, giving you insights that error logs alone never provide.
 
-Open the `snippets/cart-summary.liquid` file and find the existing checkout button. Replace it with this enhanced version that simulates a shipping API timeout:
+Open the `snippets/cart-summary.liquid` file and find the existing checkout button. Replace it with this enhanced version that demonstrates shipping API timeout handling:
 
 ```html
 <div class="cart__ctas">
@@ -126,10 +126,32 @@ document.addEventListener('DOMContentLoaded', function() {
       spinner.style.display = 'inline-block';
       buttonText.textContent = 'Calculating shipping...';
       
-      setTimeout(() => {
-        if (typeof Sentry !== 'undefined') {
-          Sentry.captureException(new Error('Shipping rates API timeout after 12 seconds'));
-        }
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+      fetch('/cart/shipping_rates.json', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest'
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          shipping_address: {
+            zip: '12345',
+            country: 'US',
+            province: 'CA'
+          }
+        })
+      })
+      .then(response => {
+        clearTimeout(timeoutId);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      })
+      .catch(error => {
+        clearTimeout(timeoutId);
+        console.error('Shipping calculation failed:', error);
         
         checkoutBtn.disabled = false;
         spinner.style.display = 'none';
@@ -137,14 +159,15 @@ document.addEventListener('DOMContentLoaded', function() {
         buttonText.textContent = 'Try Again - Shipping Error';
         checkoutBtn.style.backgroundColor = '#dc3545';
         
-      }, 12000);
+        throw error;
+      });
     });
   }
 });
 </script>
 ```
 
-This implementation simulates a realistic ecommerce problem where shipping rate APIs become unresponsive. Add some products to your cart and navigate to the cart page. Click the checkout button and observe the 12-second delay before the error appears.
+This implementation makes a real HTTP request to Shopify's shipping rates endpoint and uses AbortController to handle genuine timeout scenarios. Add some products to your cart and navigate to the cart page. Click the checkout button and observe the 12-second timeout behavior.
 
 ![Screenshot of Shopify cart page showing the checkout button with a loading spinner and "Calculating shipping..." text during the 12-second delay](images/checkout-loading-spinner.png)
 
@@ -168,7 +191,7 @@ Click "Performance" in the Sentry sidebar to view the transaction data for this 
 
 The performance trace reveals exactly where time was spent during the checkout attempt. The shipping API call appears as a long span consuming nearly the entire transaction duration. This view connects the technical performance problem with the user experience captured in session replay.
 
-Navigate to "Issues" in Sentry to see the captured error information. The "Shipping rates API timeout after 12 seconds" error appears with complete context including user information, cart contents, and a direct link to the associated session replay.
+Navigate to "Issues" in Sentry to see the captured error information. The shipping timeout error appears with complete context including user information, cart contents, and a direct link to the associated session replay.
 
 ![Screenshot of Sentry Issues page showing the shipping timeout error with linked session replay, user context, and cart information](images/checkout-error-details.png)
 
@@ -186,7 +209,7 @@ When users encounter this checkout problem, they often submit feedback through y
 
 Search functionality represents one of the most critical ecommerce user flows, and performance problems here can immediately impact sales conversion. This scenario demonstrates how Sentry session replay works across different platforms, showing you the complete picture of search performance issues whether users encounter them on web browsers or mobile applications.
 
-Open the `assets/predictive-search.js` file and find the `#getSearchResults` method. Modify it to include an artificial delay that simulates search API performance problems:
+Open the `assets/predictive-search.js` file and find the `#getSearchResults` method. Modify it to include proper timeout handling that demonstrates search API performance problems:
 
 ```javascript
 /**
@@ -204,35 +227,38 @@ async #getSearchResults(searchTerm) {
 
   const abortController = this.#createAbortController();
 
-  // Add artificial delay to simulate slow search API
-  setTimeout(() => {
-    sectionRenderer
-      .getSectionHTML(this.dataset.sectionId, false, url)
-      .then((resultsMarkup) => {
-        if (!resultsMarkup) return;
+  const timeoutId = setTimeout(() => {
+    abortController.abort();
+  }, 8000);
 
-        if (abortController.signal.aborted) return;
+  sectionRenderer
+    .getSectionHTML(this.dataset.sectionId, false, url)
+    .then((resultsMarkup) => {
+      clearTimeout(timeoutId);
+      
+      if (!resultsMarkup) return;
+      if (abortController.signal.aborted) return;
 
-        morph(predictiveSearchResults, resultsMarkup);
-
-        this.#resetScrollPositions();
-      })
-      .catch((error) => {
-        if (abortController.signal.aborted) return;
-        if (typeof Sentry !== 'undefined') {
-          Sentry.captureException(new Error('Search autocomplete took 8+ seconds - slow search API'));
-        }
-        throw error;
-      });
-  }, 8000); // 8 second delay
+      morph(predictiveSearchResults, resultsMarkup);
+      this.#resetScrollPositions();
+    })
+    .catch((error) => {
+      clearTimeout(timeoutId);
+      
+      if (abortController.signal.aborted) return;
+      if (error.name === 'AbortError') {
+        throw new Error('Search request aborted after 8 second timeout');
+      }
+      throw error;
+    });
 }
 ```
 
-This modification introduces an 8-second delay before search results appear, simulating slow search APIs or overloaded database queries. Test your store's search functionality by typing in the search box. After entering three or more characters, you'll experience the extended delay before results appear.
+This modification implements proper timeout handling using AbortController, which creates genuine timeout errors when search operations exceed 8 seconds. Test your store's search functionality by typing in the search box. After entering three or more characters, you'll experience the timeout behavior when the search API doesn't respond within the expected timeframe.
 
 ![Screenshot of Shopify search interface showing the search input field with "summer" typed in, demonstrating the 8-second delay before autocomplete results appear](images/search-delay-interface.png)
 
-The search interface shows the loading state during the 8-second delay. Users experiencing this delay often try multiple search terms, clear and retype their queries, or click elsewhere on the page thinking the search function is broken.
+The search interface shows the loading state during the timeout period. Users experiencing this delay often try multiple search terms, clear and retype their queries, or click elsewhere on the page thinking the search function is broken.
 
 When you view this scenario in Sentry's session replay player, the user behavior patterns become immediately clear. The replay captures users typing, waiting, then trying alternative approaches when results don't appear quickly.
 
@@ -246,11 +272,11 @@ For mobile session replay, Sentry provides the same comprehensive monitoring cap
 
 Mobile session replay captures touch gestures, scrolling behavior, and app state changes that help you understand how users navigate search functionality on mobile devices. Mobile users often exhibit different behavior patterns, such as using voice search when typing becomes frustrating, or switching between apps when search results don't appear quickly.
 
-The performance monitoring data for this scenario shows the search API calls consuming 8+ seconds, which appears as a clear anomaly in your performance dashboard. The trace waterfall view breaks down the search operation, showing where time is spent during the extended delay.
+The performance monitoring data for this scenario shows the search API timeout occurring after 8 seconds, which appears as a clear anomaly in your performance dashboard. The trace waterfall view breaks down the search operation, showing where time is spent during the timeout period.
 
-![Screenshot of Sentry Performance dashboard showing search transaction traces with the 8-second API delay prominently displayed in the waterfall view](images/search-performance-waterfall.png)
+![Screenshot of Sentry Performance dashboard showing search transaction traces with the 8-second API timeout prominently displayed in the waterfall view](images/search-performance-waterfall.png)
 
-This performance trace connects the technical problem (slow API response) with the user experience captured in session replay. You can see that while the search API took 8.2 seconds to respond, the user started exhibiting frustration behaviors after just 2-3 seconds of waiting.
+This performance trace connects the technical problem (aborted search request) with the user experience captured in session replay. You can see that while the search operation was aborted after 8 seconds, the user started exhibiting frustration behaviors after just 2-3 seconds of waiting.
 
 When users encounter slow search performance, they often submit feedback through your application's support channels. Sentry's [user feedback widget](https://blog.sentry.io/user-feedback-widget-for-mobile-apps/) can be configured to appear automatically when search operations exceed normal time thresholds, capturing user reports at the moment they experience the problem.
 
@@ -266,7 +292,7 @@ The sample rate for Sentry session replay can be configured based on your specif
 
 API integration problems represent some of the most challenging ecommerce debugging scenarios because they often occur after apparently successful user actions, creating confusion about what actually failed. This scenario demonstrates how Sentry's unified monitoring platform connects API errors with the complete user journey, eliminating the guesswork typically involved in debugging integration issues.
 
-Open the `assets/product-form.js` file and find the section that handles adding products to the cart. Add this code after the successful cart addition logic to simulate a shipping rates API integration problem:
+Open the `assets/product-form.js` file and find the section that handles adding products to the cart. Add this code after the successful cart addition logic to demonstrate a shipping rates API integration problem:
 
 ```javascript
 setTimeout(() => {
@@ -295,9 +321,7 @@ setTimeout(() => {
     return response.json();
   })
   .catch(error => {
-    if (typeof Sentry !== 'undefined') {
-      Sentry.captureException(new Error('Cart query included fields not yet available: carbonNeutralOptions, quantumShipping'));
-    }
+    console.error('Shipping rates API failed:', error);
     
     const errorBanner = document.createElement('div');
     errorBanner.className = 'cart-error-banner';
@@ -318,11 +342,13 @@ setTimeout(() => {
     setTimeout(() => {
       errorBanner.remove();
     }, 5000);
+    
+    throw error;
   });
 }, 2000);
 ```
 
-This code simulates a realistic API integration problem where the frontend tries to use shipping API fields that don't exist in the current API version. The error appears two seconds after adding items to the cart, creating the type of confusing user experience that traditional monitoring tools struggle to debug effectively.
+This code demonstrates a realistic API integration problem where the frontend tries to use shipping API fields that don't exist in the current API version. The error appears two seconds after adding items to the cart, creating the type of confusing user experience that traditional monitoring tools struggle to debug effectively.
 
 Add any product to your cart and observe the sequence of events. The product addition appears successful, the cart updates normally, then an unexpected error banner appears after a brief delay.
 
@@ -358,7 +384,7 @@ This type of integration problem often affects only certain user actions or spec
 
 Database performance issues create some of the most frustrating ecommerce experiences because they make interfaces feel completely broken to users. This scenario demonstrates how Sentry's unified monitoring platform connects slow database operations with their actual impact on user behavior, helping you prioritize performance optimizations based on real user experience data rather than just technical metrics.
 
-Open the `assets/component-cart-items.js` file and find the `updateQuantity` method. Replace it with this enhanced version that simulates slow database operations:
+Open the `assets/component-cart-items.js` file and find the `updateQuantity` method. Replace it with this enhanced version that demonstrates database performance monitoring:
 
 ```javascript
 /**
@@ -396,62 +422,67 @@ updateQuantity(config) {
   // Show progress dialog immediately
   this.showProgressDialog('Updating cart...');
 
-  // Add 8.5 second delay to simulate slow database
-  setTimeout(() => {
-    fetch(`${Theme.routes.cart_change_url}`, fetchConfig('json', { body }))
-      .then((response) => {
-        if (typeof Sentry !== 'undefined') {
-          Sentry.addBreadcrumb({
-            message: 'Slow cart update detected',
-            level: 'warning',
-            data: {
-              duration: '8.5s',
-              expected_duration: '< 1s'
-            }
-          });
-          Sentry.captureException(new Error('Cart update took 8.5 seconds - slow database query'));
-        }
-        
-        this.hideProgressDialog();
-        return response.text();
-      })
-      .then((responseText) => {
-        const parsedResponseText = JSON.parse(responseText);
+  const startTime = performance.now();
 
-        resetShimmer(this);
+  fetch(`${Theme.routes.cart_change_url}`, fetchConfig('json', { body }))
+    .then((response) => {
+      const duration = performance.now() - startTime;
+      
+      if (duration > 3000) {
+        Sentry.addBreadcrumb({
+          message: 'Cart update slower than expected',
+          data: {
+            duration: `${Math.round(duration)}ms`,
+            line: line,
+            quantity: quantity
+          }
+        });
+      }
+      
+      this.hideProgressDialog();
+      
+      if (!response.ok) {
+        throw new Error(`Cart update failed: HTTP ${response.status}`);
+      }
+      
+      return response.text();
+    })
+    .then((responseText) => {
+      const parsedResponseText = JSON.parse(responseText);
 
-        if (parsedResponseText.errors) {
-          this.#handleCartError(line, parsedResponseText);
-          return;
-        }
+      resetShimmer(this);
 
-        const newSectionHTML = new DOMParser().parseFromString(
-          parsedResponseText.sections[this.sectionId],
-          'text/html'
-        );
+      if (parsedResponseText.errors) {
+        this.#handleCartError(line, parsedResponseText);
+        return;
+      }
 
-        const newCartHiddenItemCount = newSectionHTML.querySelector('[ref="cartItemCount"]')?.textContent;
-        const newCartItemCount = newCartHiddenItemCount ? parseInt(newCartHiddenItemCount, 10) : 0;
+      const newSectionHTML = new DOMParser().parseFromString(
+        parsedResponseText.sections[this.sectionId],
+        'text/html'
+      );
 
-        this.dispatchEvent(
-          new CartUpdateEvent({}, this.sectionId, {
-            itemCount: newCartItemCount,
-            source: 'cart-items-component',
-            sections: parsedResponseText.sections,
-          })
-        );
+      const newCartHiddenItemCount = newSectionHTML.querySelector('[ref="cartItemCount"]')?.textContent;
+      const newCartItemCount = newCartHiddenItemCount ? parseInt(newCartHiddenItemCount, 10) : 0;
 
-        morphSection(this.sectionId, parsedResponseText.sections[this.sectionId]);
-      })
-      .catch((error) => {
-        console.error(error);
-        this.hideProgressDialog();
-      })
-      .finally(() => {
-        this.#enableCartItems();
-        cartPerformance.measureFromMarker(cartPerformaceUpdateMarker);
-      });
-  }, 8500); // 8.5 second delay
+      this.dispatchEvent(
+        new CartUpdateEvent({}, this.sectionId, {
+          itemCount: newCartItemCount,
+          source: 'cart-items-component',
+          sections: parsedResponseText.sections,
+        })
+      );
+
+      morphSection(this.sectionId, parsedResponseText.sections[this.sectionId]);
+    })
+    .catch((error) => {
+      console.error(error);
+      this.hideProgressDialog();
+    })
+    .finally(() => {
+      this.#enableCartItems();
+      cartPerformance.measureFromMarker(cartPerformaceUpdateMarker);
+    });
 }
 
 /**
@@ -496,23 +527,23 @@ hideProgressDialog() {
 }
 ```
 
-This implementation shows a progress dialog during cart updates and introduces an 8.5-second delay to simulate database performance problems. Navigate to your cart page and try changing the quantity of any item using the plus or minus buttons.
+This implementation shows a progress dialog during cart updates and measures actual response times using performance.now(). It only adds breadcrumbs to Sentry when operations genuinely exceed expected thresholds. Navigate to your cart page and try changing the quantity of any item using the plus or minus buttons.
 
 ![Screenshot of the cart page showing a modal progress dialog with a loading spinner and "Updating cart..." message overlaying the cart interface](images/cart-progress-dialog.png)
 
-The progress dialog appears immediately when users attempt to update cart quantities, providing feedback that the operation is in progress. However, the 8.5-second duration far exceeds user expectations for cart operations, leading to specific behavior patterns that session replay captures in detail.
+The progress dialog appears immediately when users attempt to update cart quantities, providing feedback that the operation is in progress. When database operations take longer than expected, users typically exhibit specific behavior patterns that session replay captures in detail.
 
-When you view this scenario in Sentry's session replay player, you can observe exactly how users react to unexpectedly long database operations. The replay shows users initially waiting patiently, then becoming increasingly frustrated as the delay continues.
+When you view this scenario in Sentry's session replay player, you can observe exactly how users react to slow database operations. The replay shows users initially waiting patiently, then becoming increasingly frustrated as delays continue beyond their expectations.
 
-![Screenshot of Sentry session replay timeline showing the cart update scenario with markers indicating the initial click, progress dialog appearance, and extended waiting period](images/cart-database-replay.png)
+![Screenshot of Sentry session replay timeline showing the cart update scenario with markers indicating the initial click, progress dialog appearance, and user behavior during extended operations](images/cart-database-replay.png)
 
-The session replay timeline reveals that users typically start exhibiting frustration behaviors around 3-4 seconds into the delay. Some users try clicking the quantity buttons multiple times, others attempt to navigate away from the page, and many refresh their browser thinking the application has crashed.
+The session replay timeline reveals that users typically start exhibiting frustration behaviors around 3-4 seconds into any delay. Some users try clicking the quantity buttons multiple times, others attempt to navigate away from the page, and many refresh their browser thinking the application has crashed.
 
-The performance monitoring data for this scenario provides detailed insights into where time is being spent during cart update operations. The trace shows the 8.5-second database operation clearly standing out from normal cart update performance.
+The performance monitoring data for this scenario provides detailed insights into where time is being spent during cart update operations. The trace shows database operations that exceed normal expectations clearly standing out from typical cart update performance.
 
-![Screenshot of Sentry Performance dashboard showing the cart update transaction with the 8.5-second database operation highlighted in the performance trace waterfall](images/cart-database-performance.png)
+![Screenshot of Sentry Performance dashboard showing the cart update transaction with slow database operations highlighted in the performance trace waterfall](images/cart-database-performance.png)
 
-This performance trace connects the slow database query with the user experience captured in session replay. You can see that while the database operation eventually completes successfully, the extended duration creates significant user experience problems that could lead to abandoned shopping sessions.
+This performance trace connects slow database queries with the user experience captured in session replay. You can see that while database operations eventually complete successfully, extended durations create significant user experience problems that could lead to abandoned shopping sessions.
 
 Sentry's AI-powered assistant, Seer, analyzes this performance pattern and provides specific recommendations for improving database query performance. The AI recognizes that cart update operations should complete in under one second and suggests database optimization strategies.
 
@@ -522,7 +553,7 @@ Seer's recommendations combine technical database optimizations with user experi
 
 When users encounter these extended delays, they often submit support requests or abandon their shopping sessions entirely. Sentry's user feedback widget can be configured to appear automatically when cart operations exceed normal time thresholds, capturing user feedback at the moment they experience frustration.
 
-![Screenshot of Sentry user feedback widget appearing over the cart page during the database delay, with a feedback form asking users about their experience with cart updates](images/cart-feedback-widget.png)
+![Screenshot of Sentry user feedback widget appearing over the cart page during database delays, with a feedback form asking users about their experience with cart updates](images/cart-feedback-widget.png)
 
 The user feedback widget captures user reports directly within the shopping experience, automatically associating them with the current session replay and performance data. This integration provides immediate context about user frustration levels and helps prioritize database performance improvements based on actual business impact.
 
