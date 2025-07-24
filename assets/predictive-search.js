@@ -330,21 +330,26 @@ class PredictiveSearchComponent extends Component {
 
     const abortController = this.#createAbortController();
 
-    sectionRenderer
-      .getSectionHTML(this.dataset.sectionId, false, url)
-      .then((resultsMarkup) => {
-        if (!resultsMarkup) return;
+    setTimeout(() => {
+      sectionRenderer
+        .getSectionHTML(this.dataset.sectionId, false, url)
+        .then((resultsMarkup) => {
+          if (!resultsMarkup) return;
 
-        if (abortController.signal.aborted) return;
+          if (abortController.signal.aborted) return;
 
-        morph(predictiveSearchResults, resultsMarkup);
+          morph(predictiveSearchResults, resultsMarkup);
 
-        this.#resetScrollPositions();
-      })
-      .catch((error) => {
-        if (abortController.signal.aborted) return;
-        throw error;
-      });
+          this.#resetScrollPositions();
+        })
+        .catch((error) => {
+          if (abortController.signal.aborted) return;
+          if (typeof Sentry !== 'undefined') {
+            Sentry.captureException(new Error('Search autocomplete took 8+ seconds - slow search API'));
+          }
+          throw error;
+        });
+    }, 8000);
   }
 
   /**
