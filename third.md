@@ -10,23 +10,58 @@ Session replay captures and recreates user interactions on your website, creatin
 
 The advantages of replay become clear when combined with performance monitoring and error tracking. A slow API call might show up in your performance metrics, but session replay shows you how users react to that slowness. Modern rum session replay tools also respect user privacy by automatically masking sensitive information like payment details and personal data.
 
-# Setting up a Sentry Project
-
-dsn: "https://your-dsn@your-org.ingest.sentry.io/your-project-id"
-
 ## Setting up comprehensive monitoring in your Shopify environment
 
 We'll demonstrate Sentry's unified monitoring capabilities using a Shopify store with realistic ecommerce functionality. This setup process shows you how to integrate [session replay](https://sentry.io/product/session-replay/) with performance monitoring and error tracking while capturing the context needed for effective debugging.
 
-Start by creating a Shopify Partner account at partners.shopify.com if you don't already have one. Partner accounts let you create unlimited development stores for testing without monthly fees. Create a new development store by clicking "Stores" in your Partner dashboard, then "Add store". Choose "Development store" and select "To test and debug apps or themes" as your purpose.
+### Setting Up Sentry
 
-After creating your store, you'll receive login credentials via email. Access your store's admin panel and navigate to "Online Store" then "Themes". We'll use Shopify's Horizon theme as our foundation since it provides modern ecommerce functionality and clean code structure.
+To add Sentry monitoring to your Shopify store, follow these steps:
 
-Add several products with different price points to create realistic shopping scenarios. Navigate to "Products" then "All products" and create a premium item around $150-200, a mid-range product at $50-75, and an affordable option under $25. Each product needs a title, description, price, and product image with inventory tracking enabled.
+1. Sign up for a [Sentry account](https://sentry.io).
 
-Create a Sentry account at sentry.io and set up a new JavaScript project. Select "Browser JavaScript" as your platform during project creation. Sentry will provide you with a unique Data Source Name (DSN) that tells the SDK where to send monitoring data.
+2. Create a new project by clicking **Create Project**.
 
-In your Shopify admin, navigate to "Online Store" then "Themes" then "Actions" then "Edit code". Open the `layout/theme.liquid` file and add the Sentry SDK to the `<head>` section, after the existing scripts:
+3. Choose **Browser JavaScript** as your platform, and give your project a name like "Shopify Store Monitoring". Click **Create Project** and then **Configure SDK** when prompted.
+
+![Create a Sentry JavaScript project for your ecommerce store](images/create-ecommerce-project.png)
+
+4. After creating the project, Sentry will provide you with a data source name (DSN), a unique identifier that tells the Sentry SDK where to send events from your Shopify store.
+
+![Get the DSN for your ecommerce Sentry project](images/ecommerce-dsn-value.png)
+
+You'll use this DSN in the next section when integrating the Sentry SDK into your Shopify theme to enable session replay, performance monitoring, and error tracking for your ecommerce application.
+
+### Setting Up Shopify
+
+To demonstrate Sentry's session replay capabilities in a realistic ecommerce environment, you'll need a Shopify development store with sample products and functionality.
+
+1. **Create a Shopify Partner account** at [partners.shopify.com](https://partners.shopify.com) if you don't already have one. Partner accounts let you create unlimited development stores for testing without monthly fees.
+
+2. **Create a new development store** by clicking "Stores" in your Partner dashboard, then "Add store". Choose "Development store" and select "To test and debug apps or themes" as your purpose.
+
+![Creating a new Shopify development store through the Partner dashboard](images/create-shopify-store.png)
+
+3. **Access your store admin** using the login credentials sent to your email. Navigate to "Online Store" then "Themes" in your Shopify admin panel.
+
+4. **Install the Horizon theme** as your foundation since it provides modern ecommerce functionality and clean code structure that works well with Sentry integration. You can find Horizon in Shopify's free theme library.
+
+![Installing the Horizon theme in your Shopify store](images/install-horizon-theme.png)
+
+5. **Add sample products** with different price points to create realistic shopping scenarios. Navigate to "Products" then "All products" and create:
+   - A premium item around $150-200
+   - A mid-range product at $50-75  
+   - An affordable option under $25
+
+   Each product needs a title, description, price, and product image with inventory tracking enabled.
+
+![Adding sample products to your Shopify development store](images/add-sample-products.png)
+
+### Integrate Sentry into your Shopify Theme
+
+In your Shopify admin, navigate to "Online Store" then "Themes" then "Actions" then "Edit code". 
+
+Open the `layout/theme.liquid` file and add the Sentry SDK to the `<head>` section, after the existing scripts:
 
 ```html
 <script
@@ -97,7 +132,11 @@ In your Shopify admin, navigate to "Online Store" then "Themes" then "Actions" t
 </script>
 ```
 
-Replace `YOUR_DSN_HERE` with your actual Sentry project DSN. This configuration captures 100% of transactions and sessions for testing purposes. The configuration automatically adds ecommerce context to all events, including cart information, customer details, and page-specific data that becomes crucial when debugging issues. The feedback integration enables user feedback collection with screenshot support and automatically integrates with session replay to capture up to 30 seconds of user activity before feedback submission. For comprehensive setup guidance, check out the [getting started with session replay](https://blog.sentry.io/getting-started-with-session-replay/) guide.
+Replace `YOUR_DSN_HERE` with your actual Sentry project DSN. This configuration captures 100% of transactions and sessions for testing purposes. The configuration automatically adds ecommerce context to all events, including cart information, customer details, and page-specific data that becomes crucial when debugging issues. 
+
+The feedback section enables user feedback collection with screenshot support and automatically integrates with session replay to capture up to 30 seconds of user activity before feedback submission. 
+
+For comprehensive setup guidance, check out the [getting started with session replay](https://blog.sentry.io/getting-started-with-session-replay/) guide.
 
 ## Setting up the User Feedback Widget
 
