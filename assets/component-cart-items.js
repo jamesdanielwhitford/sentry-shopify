@@ -125,46 +125,65 @@ class CartItemsComponent extends Component {
 
     cartTotal?.shimmer();
 
-    fetch(`${Theme.routes.cart_change_url}`, fetchConfig('json', { body }))
-      .then((response) => {
-        return response.text();
-      })
-      .then((responseText) => {
-        const parsedResponseText = JSON.parse(responseText);
+    // Show progress dialog immediately (simulate slow DB)
+const progressDialog = document.createElement('div');
+progressDialog.style.cssText = `
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  z-index: 9999; text-align: center;
+`;
+progressDialog.innerHTML = '<div>Updating cart...</div><div style="margin-top: 1rem;"></div>';
+document.body.appendChild(progressDialog);
 
-        resetShimmer(this);
-
-        if (parsedResponseText.errors) {
-          this.#handleCartError(line, parsedResponseText);
-          return;
-        }
-
-        const newSectionHTML = new DOMParser().parseFromString(
-          parsedResponseText.sections[this.sectionId],
-          'text/html'
-        );
-
-        // Grab the new cart item count from a hidden element
-        const newCartHiddenItemCount = newSectionHTML.querySelector('[ref="cartItemCount"]')?.textContent;
-        const newCartItemCount = newCartHiddenItemCount ? parseInt(newCartHiddenItemCount, 10) : 0;
-
-        this.dispatchEvent(
-          new CartUpdateEvent({}, this.sectionId, {
-            itemCount: newCartItemCount,
-            source: 'cart-items-component',
-            sections: parsedResponseText.sections,
-          })
-        );
-
-        morphSection(this.sectionId, parsedResponseText.sections[this.sectionId]);
-      })
-      .catch((error) => {
-        console.error(error);
-      })
-      .finally(() => {
-        this.#enableCartItems();
-        cartPerformance.measureFromMarker(cartPerformaceUpdateMarker);
-      });
+// Add 8.5 second delay to simulate slow database
+setTimeout(() => {
+  fetch(`${Theme.routes.cart_change_url}`, fetchConfig('json', { body }))
+    .then((response) => {
+      if (typeof Sentry !== 'undefined') {
+        Sentry.addBreadcrumb({
+          message: 'Slow cart update detected',
+          level: 'warning',
+          data: {
+            duration: '8.5s',
+            expected_duration: '< 1s'
+          }
+        });
+        Sentry.captureException(new Error('Database query took 8.5+ seconds - investigate connection pool'));
+      }
+      progressDialog.remove();
+      return response.text();
+    })
+    .then((responseText) => {
+      const parsedResponseText = JSON.parse(responseText);
+      resetShimmer(this);
+      if (parsedResponseText.errors) {
+        this.#handleCartError(line, parsedResponseText);
+        return;
+      }
+      const newSectionHTML = new DOMParser().parseFromString(
+        parsedResponseText.sections[this.sectionId],
+        'text/html'
+      );
+      const newCartHiddenItemCount = newSectionHTML.querySelector('[ref="cartItemCount"]')?.textContent;
+      const newCartItemCount = newCartHiddenItemCount ? parseInt(newCartHiddenItemCount, 10) : 0;
+      this.dispatchEvent(
+        new CartUpdateEvent({}, this.sectionId, {
+          itemCount: newCartItemCount,
+          source: 'cart-items-component',
+          sections: parsedResponseText.sections,
+        })
+      );
+      morphSection(this.sectionId, parsedResponseText.sections[this.sectionId]);
+    })
+    .catch((error) => {
+      console.error(error);
+      progressDialog.remove();
+    })
+    .finally(() => {
+      this.#enableCartItems();
+      cartPerformance.measureFromMarker(cartPerformaceUpdateMarker);
+    });
+}, 8500);
   }
 
   /**
