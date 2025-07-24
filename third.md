@@ -16,13 +16,13 @@ We'll demonstrate Sentry's unified monitoring capabilities using a Shopify store
 
 Start by creating a Shopify Partner account at partners.shopify.com if you don't already have one. Partner accounts let you create unlimited development stores for testing without monthly fees. Create a new development store by clicking "Stores" in your Partner dashboard, then "Add store". Choose "Development store" and select "To test and debug apps or themes" as your purpose.
 
-After creating your store, you'll receive login credentials via email. Access your store's admin panel and navigate to "Online Store" then "Themes". We'll use Shopify's Dawn theme as our foundation since it provides modern ecommerce functionality and clean code structure.
+After creating your store, you'll receive login credentials via email. Access your store's admin panel and navigate to "Online Store" then "Themes". We'll use Shopify's Horizon theme as our foundation since it provides modern ecommerce functionality and clean code structure.
 
 Add several products with different price points to create realistic shopping scenarios. Navigate to "Products" then "All products" and create a premium item around $150-200, a mid-range product at $50-75, and an affordable option under $25. Each product needs a title, description, price, and product image with inventory tracking enabled.
 
 Create a Sentry account at sentry.io and set up a new JavaScript project. Select "Browser JavaScript" as your platform during project creation. Sentry will provide you with a unique Data Source Name (DSN) that tells the SDK where to send monitoring data.
 
-In your Shopify admin, navigate to "Online Store" then "Themes" then "Actions" then "Edit code". Open the `layout/theme.liquid` file and add the Sentry SDK to the `<head>` section:
+In your Shopify admin, navigate to "Online Store" then "Themes" then "Actions" then "Edit code". Open the `layout/theme.liquid` file and add the Sentry SDK to the `<head>` section, after the existing scripts:
 
 ```html
 <script
@@ -86,22 +86,30 @@ Replace `YOUR_DSN_HERE` with your actual Sentry project DSN. This configuration 
 
 Our first scenario demonstrates how session replay technology reveals user behavior patterns that traditional monitoring completely misses. When checkout processes hang due to slow external APIs, users exhibit specific frustration behaviors that session replay captures in detail, giving you insights that error logs alone never provide.
 
-Open the `sections/main-cart-footer.liquid` file and find the existing checkout button. Replace it with this enhanced version that simulates a shipping API timeout:
+Open the `snippets/cart-summary.liquid` file and find the existing checkout button. Replace it with this enhanced version that simulates a shipping API timeout:
 
 ```html
-<button
-  type="submit"
-  id="checkout"
-  class="cart__checkout-button button"
-  name="checkout"
-  {% if cart == empty %}
-    disabled
+<div class="cart__ctas">
+  <button
+    type="submit"
+    id="checkout"
+    class="cart__checkout-button button"
+    name="checkout"
+    {% if cart == empty %}
+      disabled
+    {% endif %}
+    form="cart-form"
+  >
+    <span id="checkout-button-text">{{ 'content.checkout' | t }}</span>
+    <span id="checkout-spinner" class="loading__spinner" style="display: none;"></span>
+  </button>
+
+  {% if additional_checkout_buttons and settings.show_accelerated_checkout_buttons %}
+    <div class="additional-checkout-buttons additional-checkout-buttons--vertical">
+      {{ content_for_additional_checkout_buttons }}
+    </div>
   {% endif %}
-  form="cart"
->
-  <span id="checkout-button-text">{{ 'sections.cart.checkout' | t }}</span>
-  <span id="checkout-spinner" class="loading__spinner" style="display: none;"></span>
-</button>
+</div>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -178,50 +186,45 @@ When users encounter this checkout problem, they often submit feedback through y
 
 Search functionality represents one of the most critical ecommerce user flows, and performance problems here can immediately impact sales conversion. This scenario demonstrates how Sentry session replay works across different platforms, showing you the complete picture of search performance issues whether users encounter them on web browsers or mobile applications.
 
-Open the `assets/predictive-search.js` file and find the `getSearchResults` method. Modify it to include an artificial delay that simulates search API performance problems:
+Open the `assets/predictive-search.js` file and find the `#getSearchResults` method. Modify it to include an artificial delay that simulates search API performance problems:
 
 ```javascript
-getSearchResults(searchTerm) {
-  const queryKey = searchTerm.replace(' ', '-').toLowerCase();
-  this.setLiveRegionLoadingState();
+/**
+ * Fetch search results using the section renderer and update the results container.
+ * @param {string} searchTerm - The term to search for
+ */
+async #getSearchResults(searchTerm) {
+  if (!this.dataset.sectionId) return;
 
-  if (this.cachedResults[queryKey]) {
-    this.renderSearchResults(this.cachedResults[queryKey]);
-    return;
-  }
+  const url = new URL(Theme.routes.predictive_search_url, location.origin);
+  url.searchParams.set('q', searchTerm);
+  url.searchParams.set('resources[limit_scope]', 'each');
 
+  const { predictiveSearchResults } = this.refs;
+
+  const abortController = this.#createAbortController();
+
+  // Add artificial delay to simulate slow search API
   setTimeout(() => {
-    fetch(`${routes.predictive_search_url}?q=${encodeURIComponent(searchTerm)}&section_id=predictive-search`, {
-      signal: this.abortController.signal,
-    })
-      .then((response) => {
-        if (!response.ok) {
-          var error = new Error(response.status);
-          this.close();
-          throw error;
-        }
-        return response.text();
-      })
-      .then((text) => {
-        const resultsMarkup = new DOMParser()
-          .parseFromString(text, 'text/html')
-          .querySelector('#shopify-section-predictive-search').innerHTML;
-        this.allPredictiveSearchInstances.forEach((predictiveSearchInstance) => {
-          predictiveSearchInstance.cachedResults[queryKey] = resultsMarkup;
-        });
-        this.renderSearchResults(resultsMarkup);
+    sectionRenderer
+      .getSectionHTML(this.dataset.sectionId, false, url)
+      .then((resultsMarkup) => {
+        if (!resultsMarkup) return;
+
+        if (abortController.signal.aborted) return;
+
+        morph(predictiveSearchResults, resultsMarkup);
+
+        this.#resetScrollPositions();
       })
       .catch((error) => {
-        if (error?.code === 20) {
-          return;
-        }
+        if (abortController.signal.aborted) return;
         if (typeof Sentry !== 'undefined') {
           Sentry.captureException(new Error('Search autocomplete took 8+ seconds - slow search API'));
         }
-        this.close();
         throw error;
       });
-  }, 8000);
+  }, 8000); // 8 second delay
 }
 ```
 
@@ -355,23 +358,47 @@ This type of integration problem often affects only certain user actions or spec
 
 Database performance issues create some of the most frustrating ecommerce experiences because they make interfaces feel completely broken to users. This scenario demonstrates how Sentry's unified monitoring platform connects slow database operations with their actual impact on user behavior, helping you prioritize performance optimizations based on real user experience data rather than just technical metrics.
 
-Open the `assets/cart.js` file and find the `updateQuantity` method. Replace it with this enhanced version that simulates slow database operations:
+Open the `assets/component-cart-items.js` file and find the `updateQuantity` method. Replace it with this enhanced version that simulates slow database operations:
 
 ```javascript
-updateQuantity(line, quantity, event, name, variantId) {
-  this.enableLoading(line);
+/**
+ * Updates the quantity.
+ * @param {Object} config - The config.
+ * @param {number} config.line - The line.
+ * @param {number} config.quantity - The quantity.
+ * @param {string} config.action - The action.
+ */
+updateQuantity(config) {
+  const cartPerformaceUpdateMarker = cartPerformance.createStartingMarker(`${config.action}:user-action`);
+
+  this.#disableCartItems();
+
+  const { line, quantity } = config;
+  const { cartTotal } = this.refs;
+
+  const cartItemsComponents = document.querySelectorAll('cart-items-component');
+  const sectionsToUpdate = new Set([this.sectionId]);
+  cartItemsComponents.forEach((item) => {
+    if (item instanceof HTMLElement && item.dataset.sectionId) {
+      sectionsToUpdate.add(item.dataset.sectionId);
+    }
+  });
 
   const body = JSON.stringify({
-    line,
-    quantity,
-    sections: this.getSectionsToRender().map((section) => section.section),
+    line: line,
+    quantity: quantity,
+    sections: Array.from(sectionsToUpdate).join(','),
     sections_url: window.location.pathname,
   });
 
+  cartTotal?.shimmer();
+
+  // Show progress dialog immediately
   this.showProgressDialog('Updating cart...');
 
+  // Add 8.5 second delay to simulate slow database
   setTimeout(() => {
-    fetch(`${routes.cart_change_url}`, { ...fetchConfig(), ...{ body } })
+    fetch(`${Theme.routes.cart_change_url}`, fetchConfig('json', { body }))
       .then((response) => {
         if (typeof Sentry !== 'undefined') {
           Sentry.addBreadcrumb({
@@ -388,41 +415,49 @@ updateQuantity(line, quantity, event, name, variantId) {
         this.hideProgressDialog();
         return response.text();
       })
-      .then((state) => {
-        const parsedState = JSON.parse(state);
-        this.classList.toggle('is-empty', parsedState.item_count === 0);
-        const cartDrawerWrapper = document.querySelector('cart-drawer');
-        const cartFooter = document.getElementById('main-cart-footer');
+      .then((responseText) => {
+        const parsedResponseText = JSON.parse(responseText);
 
-        if (cartFooter) cartFooter.classList.toggle('is-empty', parsedState.item_count === 0);
-        if (cartDrawerWrapper) cartDrawerWrapper.classList.toggle('is-empty', parsedState.item_count === 0);
-        
-        this.getSectionsToRender().forEach((section) => {
-          const elementToReplace =
-            document.getElementById(section.id).querySelector(section.selector) || document.getElementById(section.id);
-          elementToReplace.innerHTML = this.getSectionInnerHTML(parsedState.sections[section.section], section.selector);
-        });
-        
-        this.updateLiveRegions(line, parsedState.item_count);
-        const lineItem = document.getElementById(`CartItem-${line}`) || document.getElementById(`CartDrawer-Item-${line}`);
-        if (lineItem && lineItem.querySelector(`[name="${name}"]`)) {
-          cartDrawerWrapper ? this.disableLoading(line) : lineItem.querySelector(`[name="${name}"]`).focus();
-        } else if (parsedState.item_count === 0 && cartDrawerWrapper) {
-          this.disableLoading(line);
+        resetShimmer(this);
+
+        if (parsedResponseText.errors) {
+          this.#handleCartError(line, parsedResponseText);
+          return;
         }
-        if (!cartDrawerWrapper) {
-          this.disableLoading(line);
-        }
+
+        const newSectionHTML = new DOMParser().parseFromString(
+          parsedResponseText.sections[this.sectionId],
+          'text/html'
+        );
+
+        const newCartHiddenItemCount = newSectionHTML.querySelector('[ref="cartItemCount"]')?.textContent;
+        const newCartItemCount = newCartHiddenItemCount ? parseInt(newCartHiddenItemCount, 10) : 0;
+
+        this.dispatchEvent(
+          new CartUpdateEvent({}, this.sectionId, {
+            itemCount: newCartItemCount,
+            source: 'cart-items-component',
+            sections: parsedResponseText.sections,
+          })
+        );
+
+        morphSection(this.sectionId, parsedResponseText.sections[this.sectionId]);
       })
-      .catch(() => {
-        this.querySelectorAll('.loading__spinner').forEach((overlay) => overlay.classList.add('hidden'));
-        const errors = document.getElementById('cart-errors') || document.getElementById('CartDrawer-CartErrors');
-        errors.textContent = window.cartStrings.error;
+      .catch((error) => {
+        console.error(error);
         this.hideProgressDialog();
+      })
+      .finally(() => {
+        this.#enableCartItems();
+        cartPerformance.measureFromMarker(cartPerformaceUpdateMarker);
       });
-  }, 8500);
+  }, 8500); // 8.5 second delay
 }
 
+/**
+ * Shows the progress dialog.
+ * @param {string} message - The message to display.
+ */
 showProgressDialog(message) {
   let dialog = document.getElementById('cart-progress-dialog');
   if (!dialog) {
@@ -450,6 +485,9 @@ showProgressDialog(message) {
   dialog.style.display = 'block';
 }
 
+/**
+ * Hides the progress dialog.
+ */
 hideProgressDialog() {
   const dialog = document.getElementById('cart-progress-dialog');
   if (dialog) {
