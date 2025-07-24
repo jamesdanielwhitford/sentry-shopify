@@ -1,0 +1,7 @@
+\n
+Time Total:  %{time_total}s
+Time Namelookup:  %{time_namelookup}s
+Time Connect:  %{time_connect}s
+Time Starttransfer:  %{time_starttransfer}s
+HTTP Code: %{http_code}
+\n

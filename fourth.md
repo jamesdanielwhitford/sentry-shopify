@@ -143,7 +143,7 @@ Replace `YOUR_DSN_HERE` with your actual Sentry project DSN. This configuration 
 
 **User Feedback Widget**: The `feedbackIntegration` configuration creates a persistent feedback widget that appears as a floating button in your store. When users encounter problems during their shopping experience, they can click this widget to submit feedback, which automatically captures their current session replay along with screenshots of the exact moment they experienced the issue.
 
-![Screenshot of the Sentry user feedback widget appearing as a purple feedback button in the bottom-right corner of a Shopify store.](images/feedback-widget-setup.png)
+![Sentry user feedback widget appearing as a purple feedback button in the bottom-right corner of a Shopify store.](images/feedback-widget-setup.png)
 
 ## Identify user frustration during checkout failures
 
@@ -177,11 +177,11 @@ Open the `snippets/cart-summary.liquid` file and find the existing checkout butt
  Replace it with this:
 
 ```html
-<div class="cart__ctas">
+<div class="cartctas">
   <button
     type="submit"
     id="checkout"
-    class="cart__checkout-button button"
+    class="cartcheckout-button button"
     name="checkout"
     {% if cart == empty %}
       disabled
@@ -197,7 +197,6 @@ Open the `snippets/cart-summary.liquid` file and find the existing checkout butt
     </div>
   {% endif %}
 </div>
-
 <script>
 document.addEventListener('DOMContentLoaded', function() {
   const checkoutBtn = document.getElementById('checkout');
@@ -213,52 +212,31 @@ document.addEventListener('DOMContentLoaded', function() {
       spinner.style.display = 'inline-block';
       buttonText.textContent = 'Calculating shipping...';
       
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 12000);
-
-      fetch('/cart/shipping_rates.json', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Requested-With': 'XMLHttpRequest'
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          shipping_address: {
-            zip: '12345',
-            country: 'US',
-            province: 'CA'
-          }
-        })
-      })
+      const startTime = performance.now();
+      
+      fetch('https://httpbin.org/delay/12')
       .then(response => {
-        clearTimeout(timeoutId);
+        const duration = performance.now() - startTime;
+        console.log(`Request completed in ${Math.round(duration)}ms`);
+        
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return response.json();
       })
-      .catch(error => {
-        clearTimeout(timeoutId);
-        console.error('Shipping calculation failed:', error);
-        
-        checkoutBtn.disabled = false;
-        spinner.style.display = 'none';
-        buttonText.style.display = 'inline-block';
-        buttonText.textContent = 'Try Again - Shipping Error';
-        checkoutBtn.style.backgroundColor = '#dc3545';
-        
-        throw error;
-      });
+      .then(data => {
+        console.log('Delay service response:', data);
+        throw new Error('Shipping rates API timeout after 12 seconds');
+      })
     });
   }
 });
 </script>
 ```
 
-This wil make an HTTP request to Shopify's shipping rates endpoint and uses `AbortController` to handle timeout scenarios. 
+This wil make an itentionally slow API call when the user clicks the checkouit button on the `/cart` page. 
 
-Add some products to your cart and navigate to the `/cart` page. Click the checkout button to trigger the error.
+Add some products to your cart and navigate to the `/cart` page. Click the **Checkout** button to trigger the error.
 
-![Screenshot of Shopify cart page showing the checkout button with a loading spinner and "Calculating shipping..." text during the 12-second delay](images/checkout-loading-spinner.png)
+![Screenshot of Shopify cart page showing the checkout button with the failed request error shown](images/checkout-failed.png)
 
 ### Viewing Session Replay Data
 
@@ -274,7 +252,7 @@ The main panel displays the visual reproduction of what the user saw, while the 
 
 You can also see your replays from inside an issue. Navigate to "Issues" in Sentry to see the captured error information, traces, and session replay.
 
-![Screenshot of Sentry Issues page showing the shipping timeout error with linked session replay, user context, and cart information](images/checkout-error-details.png)
+![Sentry Issues page showing the shipping timeout error with linked session replay, user context, and cart information](images/checkout-error-details.png)
 
 Instead of manually correlating an error log entry with user behavior data from a separate tool, you can immediately jump from the error details to watching exactly how the user experienced the problem. The error includes ecommerce-specific context like cart value and items, helping you understand the business impact.
 
@@ -286,99 +264,123 @@ When users encounter this checkout problem, the feedback widget provides an easy
 
 The user feedback widget remains accessible in the corner of the screen during checkout delays, allowing users to report their experience while it's happening. The feedback is automatically associated with the current session replay and error data, giving you complete context about the reported problem without requiring additional investigation.
 
-This unified approach means when a customer reports "checkout doesn't work," you immediately have:
+This means when a customer reports an issue, you immediately have:
 - **Visual evidence** of their exact experience through session replay
 - **Technical details** about the specific error that occurred
 - **User context** including their feedback about the problem
 - **Business impact** data like cart value and customer information
 
-## Debugging search performance with performance monitoring
+## Investigating API errors with complete user context
 
-Search functionality represents one of the most critical ecommerce user flows, and performance problems here can immediately impact sales conversion. This scenario demonstrates how Session Replay connects with performance monitoring and AI-powered optimization recommendations to provide comprehensive insights into search performance issues.
+API integration problems represent some of the most challenging ecommerce debugging scenarios because they often occur after apparently successful user actions, creating confusion about what actually failed. This scenario demonstrates how Sentry's unified monitoring platform connects API errors with the complete user journey, eliminating the guesswork typically involved in debugging integration issues.
 
-Open the `assets/predictive-search.js` file and find the `#getSearchResults` method. Modify it to include proper timeout handling that demonstrates search API performance problems:
+Open the `assets/product-form.js` file find the second instance of this line of code:
 
-```javascript
-/**
- * Fetch search results using the section renderer and update the results container.
- * @param {string} searchTerm - The term to search for
- */
-async #getSearchResults(searchTerm) {
-  if (!this.dataset.sectionId) return;
-
-  const url = new URL(Theme.routes.predictive_search_url, location.origin);
-  url.searchParams.set('q', searchTerm);
-  url.searchParams.set('resources[limit_scope]', 'each');
-
-  const { predictiveSearchResults } = this.refs;
-
-  const abortController = this.#createAbortController();
-
-  const timeoutId = setTimeout(() => {
-    abortController.abort();
-  }, 8000);
-
-  sectionRenderer
-    .getSectionHTML(this.dataset.sectionId, false, url)
-    .then((resultsMarkup) => {
-      clearTimeout(timeoutId);
-      
-      if (!resultsMarkup) return;
-      if (abortController.signal.aborted) return;
-
-      morph(predictiveSearchResults, resultsMarkup);
-      this.#resetScrollPositions();
-    })
-    .catch((error) => {
-      clearTimeout(timeoutId);
-      
-      if (abortController.signal.aborted) return;
-      if (error.name === 'AbortError') {
-        throw new Error('Search request aborted after 8 second timeout');
-      }
-      throw error;
-    });
-}
+```js
+ this.dispatchEvent(
+  new CartAddEvent({}, id.toString(), {
+    source: 'product-form-component',
+    itemCount: Number(formData.get('quantity')) || Number(this.dataset.quantityDefault),
+    productId: this.dataset.productId,
+    sections: response.sections,
+  })
+);
 ```
 
-This modification implements proper timeout handling using AbortController, which creates genuine timeout errors when search operations exceed 8 seconds. Test your store's search functionality by typing in the search box. After entering three or more characters, you'll experience the timeout behavior when the search API doesn't respond within the expected timeframe.
+Add this code just below:
 
-![Screenshot of Shopify search interface showing the search input field with "summer" typed in, demonstrating the 8-second delay before autocomplete results appear](images/search-delay-interface.png)
+```javascript
+setTimeout(() => {
+  const problematicQuery = {
+    cart: {
+      id: window.cart?.id,
+      estimatedShipping: true,
+      futureDeliveryOptions: true,
+      carbonNeutralOptions: true,
+      quantumShipping: true
+    }
+  };
+  
+  fetch(`/cart/shipping_rates.json`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Requested-With': 'XMLHttpRequest'
+    },
+    body: JSON.stringify(problematicQuery)
+  })
+  .then(response => {
+    if (!response.ok) {
+      throw new Error(`Shipping API error: ${response.status}`);
+    }
+    return response.json();
+  })
+  .catch(error => {
+    console.error('Shipping rates API failed:', error);
+    
+    const errorBanner = document.createElement('div');
+    errorBanner.className = 'cart-error-banner';
+    errorBanner.style.cssText = `
+      background: #dc3545;
+      color: white;
+      padding: 1rem;
+      text-align: center;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 9999;
+    `;
+    errorBanner.textContent = 'Unexpected error occurred while calculating shipping rates';
+    document.body.appendChild(errorBanner);
+    
+    setTimeout(() => {
+      errorBanner.remove();
+    }, 5000);
+    
+    throw error;
+  });
+}, 2000);
+```
 
-The search interface shows the loading state during the timeout period. Users experiencing this delay often try multiple search terms, clear and retype their queries, or click elsewhere on the page thinking the search function is broken.
+This code demonstrates a realistic API integration problem where the frontend tries to use shipping API fields that don't exist in the current API version.
 
-### Analyzing User Behavior Through Session Replay
+Add any product to your cart, addition appears successful, the cart updates normally, then an unexpected error banner appears after a brief delay.
 
-When you view this scenario in Sentry's session replay player, the user behavior patterns become immediately clear. The replay captures users typing, waiting, then trying alternative approaches when results don't appear quickly.
+![Product page showing a red error banner appearing at the top of the screen](images/cart-api-error-sequence.png)
 
-![Screenshot of Sentry session replay showing search behavior with timeline markers indicating user typing, waiting periods, and multiple search attempts during the delay](images/search-replay-timeline.png)
+### Understanding User Confusion Through Session Replay
 
-This replay timeline reveals typical user reactions to slow search performance. The user types "summer dress" but when no results appear after 2-3 seconds, they clear the search and try "dress" instead. The second search also experiences the same delay, leading to visible user frustration captured in the replay.
+When you view this scenario in Sentry's session replay player, the complete user journey becomes clear. The replay shows the successful product addition, brief normal browsing, then the sudden appearance of the error banner.
 
-### Performance Monitoring and Trace Analysis
+![Screenshot of Sentry session replay player showing the complete cart addition sequence with timeline markers indicating the product addition, cart update, and delayed error appearance](images/cart-error-replay-timeline.png)
 
-The performance monitoring data for this scenario shows the search API timeout occurring after 8 seconds, which appears as a clear anomaly in your performance dashboard. The trace waterfall view breaks down the search operation, showing where time is spent during the timeout period.
+The session replay timeline reveals the critical insight that the error isn't related to the initial product addition but to a subsequent API call that failed. This context helps developers understand the root cause and prevents them from investigating the wrong parts of the application.
 
-![Screenshot of Sentry Performance dashboard showing search transaction traces with the 8-second API timeout prominently displayed in the waterfall view](images/search-performance-waterfall.png)
+The unified monitoring approach means you can immediately jump from the error details to watching exactly how users experienced the problem. The session replay shows that users are often confused by this type of delayed error, sometimes attempting to add items to their cart multiple times because they're uncertain whether the first attempt succeeded.
 
-This performance trace connects the technical problem (aborted search request) with the user experience captured in session replay. You can see that while the search operation was aborted after 8 seconds, the user started exhibiting frustration behaviors after just 2-3 seconds of waiting.
+### Performance Monitoring for API Integration Issues
 
-### AI-Powered Optimization Recommendations
+Performance monitoring for this scenario shows the failed API call in the network trace, with timing information and response codes that help developers understand the technical aspects of the integration problem.
 
-Sentry's AI-powered assistant, Seer, analyzes this pattern across multiple sessions and suggests implementing proper timeout handling for search API calls. The AI recognizes that users consistently abandon searches when results don't appear within 5-6 seconds and recommends optimizations.
+![Screenshot of Sentry Performance dashboard showing the failed shipping rates API call with HTTP error codes and response timing information](images/cart-api-performance-trace.png)
 
-![Screenshot of Sentry Seer AI interface showing recommendations for the search timeout issue, including API optimization suggestions and user experience improvements](images/seer-search-recommendations.png)
+User session replay software tools that work in isolation would show you the visual user experience but miss the technical context about why the error occurred. Traditional API monitoring might capture the failed request but not show you how users reacted to the error. Sentry's unified platform automatically connects these different data types, giving you the complete picture needed for effective debugging.
 
-Seer's recommendations combine technical solutions with user experience improvements. The AI suggests implementing client-side caching for common search terms, adding search suggestions that appear immediately while API calls complete, and providing search filters that help users narrow results more effectively. These suggestions come from analyzing user behavior patterns across multiple session replays.
+### AI-Powered Debugging Assistance
+
+Sentry's AI-powered assistant, Seer, analyzes this pattern across multiple sessions and provides specific recommendations for improving API integration handling. The AI recognizes that delayed errors after successful operations create user confusion and suggests better error handling strategies.
+
+![Screenshot of Sentry Seer AI interface showing recommendations for the cart API integration issue, including error handling improvements and user experience suggestions](images/seer-cart-api-recommendations.png)
+
+Seer's recommendations combine technical API fixes with user experience improvements. The AI suggests implementing proper error boundaries that catch integration failures before they reach users, adding validation for API field compatibility, and providing clearer feedback when background operations fail. These suggestions come from analyzing user behavior patterns across multiple session replays.
 
 The AI recognizes specific patterns in the session replay data:
-- Users typically start showing frustration after 2-3 seconds of waiting
-- Common retry behaviors include clearing search terms and trying alternatives
-- Users often navigate away from search entirely when delays exceed 6-8 seconds
+- Users exhibit confusion when errors appear after successful actions
+- Many users attempt the same action multiple times when delayed errors occur
+- Clear error messaging during the actual user action reduces confusion
 
-Based on these insights, Seer provides actionable recommendations that address both the technical performance issues and the user experience problems they create.
-
-This unified approach means you can optimize search performance based on actual user behavior data rather than just technical metrics. The combination of session replay showing user frustration, performance traces identifying the slow API calls, and AI recommendations providing specific optimization strategies gives you everything needed to improve the search experience effectively.
+Based on these insights, Seer provides actionable recommendations that address both the technical integration problems and the user experience issues they create. This type of integration problem often affects only certain user actions or specific product configurations, making it difficult to reproduce in development environments. Session replay data helps you understand the specific conditions that trigger these API errors, enabling more targeted testing and verification of fixes.
 
 ## The unified advantage: connecting session replay with complete monitoring
 
@@ -402,9 +404,9 @@ User feedback integration completes the unified monitoring picture by connecting
 
 Session replay transforms ecommerce debugging from guesswork into data-driven investigation. By combining visual user experience data with performance monitoring and error tracking, you gain complete context about problems that affect your customers' shopping experience, enabling faster resolution and better prevention of similar issues.
 
-The checkout timeout scenario demonstrated how session replay reveals user frustration patterns, error tracking provides technical context about API failures, and user feedback captures customer sentiment—all connected in a single platform. The search performance scenario showed how session replay data connects with performance traces to identify optimization opportunities, while AI recommendations provide actionable next steps based on actual user behavior patterns.
+The checkout timeout scenario demonstrated how session replay reveals user frustration patterns, error tracking provides technical context about API failures, and user feedback captures customer sentiment—all connected in a single platform. The cart API integration scenario showed how session replay data connects with performance traces to identify the root cause of confusing user experiences, while AI recommendations provide actionable next steps based on actual user behavior patterns.
 
-Start implementing session replay on your most critical user flows, then expand coverage based on the debugging value you discover. Focus on scenarios where traditional logging provides insufficient context about user experience problems, particularly during checkout processes and product searches where user frustration directly impacts revenue.
+Start implementing session replay on your most critical user flows, then expand coverage based on the debugging value you discover. Focus on scenarios where traditional logging provides insufficient context about user experience problems, particularly during checkout processes and cart operations where user frustration directly impacts revenue.
 
 When users report problems with your ecommerce application, Sentry's unified platform lets you immediately see exactly what they experienced and identify the technical root cause, leading to faster fixes and better customer experiences.
 
