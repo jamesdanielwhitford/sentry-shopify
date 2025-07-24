@@ -24,44 +24,41 @@ To add Sentry monitoring to your Shopify store, follow these steps:
 
 3. Choose **Browser JavaScript** as your platform, and give your project a name like "Shopify Store Monitoring". Click **Create Project** and then **Configure SDK** when prompted.
 
-![Create a Sentry JavaScript project for your ecommerce store](images/create-ecommerce-project.png)
+![Create a Sentry JavaScript project for your ecommerce store](images/create-project.png)
 
 4. After creating the project, Sentry will provide you with a data source name (DSN), a unique identifier that tells the Sentry SDK where to send events from your Shopify store.
 
-![Get the DSN for your ecommerce Sentry project](images/ecommerce-dsn-value.png)
+![Get the DSN for your ecommerce Sentry project](images/dsn-value.png)
 
-You'll use this DSN in the next section when integrating the Sentry SDK into your Shopify theme to enable session replay, performance monitoring, and error tracking for your ecommerce application.
+We will use this DSN in the next section when integrating the Sentry SDK into the Shopify theme to enable session replay, performance monitoring, and error tracking for your ecommerce application.
 
 ### Setting Up Shopify
 
-To demonstrate Sentry's session replay capabilities in a realistic ecommerce environment, you'll need a Shopify development store with sample products and functionality.
+To demonstrate Sentry's session replay capabilities in a realistic ecommerce environment, we will set up a Shopify development store.
 
 1. **Create a Shopify Partner account** at [partners.shopify.com](https://partners.shopify.com) if you don't already have one. Partner accounts let you create unlimited development stores for testing without monthly fees.
 
-2. **Create a new development store** by clicking "Stores" in your Partner dashboard, then "Add store". Choose "Development store" and select "To test and debug apps or themes" as your purpose.
+2. **Create a new development store** by clicking "Stores" in your Partner dashboard, then "Add store". Choose "Development store" and select "Create a store to test and build" as your purpose.
+
+3. **Create your store** after giving it a name, click **Create Development Store**.
 
 ![Creating a new Shopify development store through the Partner dashboard](images/create-shopify-store.png)
 
-3. **Access your store admin** using the login credentials sent to your email. Navigate to "Online Store" then "Themes" in your Shopify admin panel.
-
-4. **Install the Horizon theme** as your foundation since it provides modern ecommerce functionality and clean code structure that works well with Sentry integration. You can find Horizon in Shopify's free theme library.
+3. **Install your store theme.** Navigate to "Online Store" then "Themes" in your Shopify admin panel. Install the Horizon theme to follow along with this guide. Once you have added this theme, click **Publish**.
 
 ![Installing the Horizon theme in your Shopify store](images/install-horizon-theme.png)
 
-5. **Add sample products** with different price points to create realistic shopping scenarios. Navigate to "Products" then "All products" and create:
-   - A premium item around $150-200
-   - A mid-range product at $50-75  
-   - An affordable option under $25
+4. **Get the store password** by clicking **See store password**. The store requires a password while in development mode.
 
-   Each product needs a title, description, price, and product image with inventory tracking enabled.
+5. **Add sample products** with different price points to create realistic shopping scenarios. Navigate to "Products" then "Add product" and create a demo product, and click **Save**.
 
 ![Adding sample products to your Shopify development store](images/add-sample-products.png)
 
 ### Integrate Sentry into your Shopify Theme
 
-In your Shopify admin, navigate to "Online Store" then "Themes" then "Actions" then "Edit code". 
+In your Shopify admin, navigate to "Online Store" then "Themes". Click the three dots on your active theme, then "Edit code". 
 
-Open the `layout/theme.liquid` file and add the Sentry SDK to the `<head>` section, after the existing scripts:
+Open the `layout/theme.liquid` file and add the Sentry SDK to the `<head>` section, before `{{ content_for_header }}`.
 
 ```html
 <script
@@ -132,53 +129,23 @@ Open the `layout/theme.liquid` file and add the Sentry SDK to the `<head>` secti
 </script>
 ```
 
-Replace `YOUR_DSN_HERE` with your actual Sentry project DSN. This configuration captures 100% of transactions and sessions for testing purposes. The configuration automatically adds ecommerce context to all events, including cart information, customer details, and page-specific data that becomes crucial when debugging issues. 
+Replace `YOUR_DSN_HERE` with your actual Sentry project DSN. This configuration sets up three essential monitoring capabilities for your ecommerce store:
 
-The feedback section enables user feedback collection with screenshot support and automatically integrates with session replay to capture up to 30 seconds of user activity before feedback submission. 
+**Session Replay Configuration**: The `replaysSessionSampleRate: 1.0` and `replaysOnErrorSampleRate: 1.0` settings capture 100% of user sessions and ensure every error is accompanied by session replay data. This comprehensive capture rate is ideal for development and testing environments where you want complete visibility into user behavior.
+
+**Performance Monitoring**: The `tracesSampleRate: 1.0` setting enables performance monitoring for all transactions, allowing you to identify slow API calls, database queries, and frontend operations that impact user experience.
+
+**User Feedback Widget**: The `feedbackIntegration` configuration creates a persistent feedback widget that appears as a floating button in your store. When users encounter problems during their shopping experience, they can click this widget to submit feedback, which automatically captures their current session replay along with screenshots of the exact moment they experienced the issue.
+
+**Ecommerce Context**: The `beforeSend` function automatically adds cart information, customer details, and page-specific data to every event. This context becomes crucial when debugging issues because you can immediately see which products were in the user's cart, their customer status, and what page template they were viewing when problems occurred.
+
+Once implemented, the feedback widget appears as a floating button in the bottom-right corner of your store, ready to collect user reports when they encounter issues during checkout, search, or cart operations.
+
+![Screenshot of the Sentry user feedback widget appearing as a purple feedback button in the bottom-right corner of a Shopify store, with the feedback form open showing fields for name, email, and message description](images/feedback-widget-setup.png)
+
+The feedback widget integrates seamlessly with session replay and performance monitoring. When users submit feedback about slow checkout processes or confusing error messages, their reports automatically include up to 30 seconds of session replay data leading up to the feedback submission, plus any performance data and errors that occurred during their session. This integration eliminates the typical disconnect between user complaints and technical debugging information.
 
 For comprehensive setup guidance, check out the [getting started with session replay](https://blog.sentry.io/getting-started-with-session-replay/) guide.
-
-## Setting up the User Feedback Widget
-
-The User Feedback Widget allows you to collect feedback from users during error scenarios or at any time during their shopping experience. The widget integrates seamlessly with session replay, automatically capturing user session data when feedback is submitted.
-
-Add this helper function to your theme's JavaScript to programmatically trigger the feedback widget:
-
-```html
-<script>
-// Add this function to trigger the feedback widget
-function showFeedbackWidget(context = {}) {
-  const feedbackIntegration = Sentry.getClient().getIntegration('Feedback');
-  if (feedbackIntegration) {
-    // Add context tags before showing the widget
-    Object.keys(context.tags || {}).forEach(key => {
-      Sentry.setTag(key, context.tags[key]);
-    });
-    
-    feedbackIntegration.openDialog();
-  }
-}
-
-// Prevent showing feedback too frequently
-function shouldShowFeedback() {
-  const lastFeedback = localStorage.getItem('last_feedback_time');
-  if (lastFeedback && Date.now() - parseInt(lastFeedback) < 300000) { // 5 minutes
-    return false;
-  }
-  return true;
-}
-
-// Track when feedback is submitted
-Sentry.addEventProcessor((event) => {
-  if (event.type === 'feedback') {
-    localStorage.setItem('last_feedback_time', Date.now().toString());
-  }
-  return event;
-});
-</script>
-```
-
-The feedback widget requires browsers that support Shadow DOM and the Dialog element. Modern browsers including Chrome, Firefox, Safari, and Edge support these features. When users submit feedback, they can optionally include screenshots which count toward your Sentry attachments quota (1GB included with all plans, approximately 2500 screenshots).
 
 ## Identifying user frustration during checkout failures
 
@@ -257,15 +224,6 @@ document.addEventListener('DOMContentLoaded', function() {
         buttonText.textContent = 'Try Again - Shipping Error';
         checkoutBtn.style.backgroundColor = '#dc3545';
         
-        // Show feedback widget after checkout failure
-        setTimeout(() => {
-          if (shouldShowFeedback()) {
-            showFeedbackWidget({
-              tags: { error_type: 'checkout_timeout' }
-            });
-          }
-        }, 2000);
-        
         throw error;
       });
     });
@@ -310,7 +268,7 @@ Sentry's AI-powered assistant, Seer, analyzes this pattern across multiple sessi
 
 Seer's recommendations combine technical solutions with user experience improvements. The AI suggests implementing client-side timeout handling, adding progress indicators with estimated completion times, and providing alternative shipping options when the primary API is slow. These suggestions come from analyzing user behavior patterns across multiple session replays.
 
-When users encounter this checkout problem, they often submit feedback through your support channels. Sentry's user feedback widget can be programmatically triggered during these checkout failures, automatically associating user reports with the current session replay and performance data. This integration eliminates the manual work typically required to connect user complaints with technical debugging information.
+When users encounter this checkout problem, the feedback widget provides an easy way for them to report the issue directly. Since the widget automatically includes session replay data and performance context, user reports come with the complete technical information needed for debugging, eliminating the typical disconnect between user complaints and technical investigation.
 
 ## Debugging search performance across web and mobile platforms
 
@@ -354,15 +312,6 @@ async #getSearchResults(searchTerm) {
       
       if (abortController.signal.aborted) return;
       if (error.name === 'AbortError') {
-        // Show feedback widget for search timeout
-        setTimeout(() => {
-          if (shouldShowFeedback()) {
-            showFeedbackWidget({
-              tags: { error_type: 'search_timeout' }
-            });
-          }
-        }, 1000);
-        
         throw new Error('Search request aborted after 8 second timeout');
       }
       throw error;
@@ -394,11 +343,11 @@ The performance monitoring data for this scenario shows the search API timeout o
 
 This performance trace connects the technical problem (aborted search request) with the user experience captured in session replay. You can see that while the search operation was aborted after 8 seconds, the user started exhibiting frustration behaviors after just 2-3 seconds of waiting.
 
-When users encounter slow search performance, they often submit feedback through your application's support channels. Sentry's [user feedback widget](https://blog.sentry.io/user-feedback-widget-for-mobile-apps/) can be programmatically triggered when search operations exceed normal time thresholds, capturing user reports at the moment they experience the problem.
+When users encounter slow search performance, the feedback widget allows them to report the issue directly from within their shopping experience. Since the widget automatically includes session replay data and performance context, their reports provide complete technical information about the search delay problem.
 
 ![Screenshot of Sentry user feedback widget appearing in the application interface during slow search performance, with the feedback form overlaying the search results area](images/search-feedback-widget.png)
 
-The user feedback widget appears contextually when search performance problems occur, allowing users to report issues directly from within their shopping experience. The feedback is automatically associated with the current session replay and performance data, giving you complete context about the reported problem without requiring additional investigation.
+The user feedback widget remains accessible in the corner of the screen, allowing users to report search performance issues at their convenience. The feedback is automatically associated with the current session replay and performance data, giving you complete context about the reported problem without requiring additional investigation.
 
 Sentry's unified monitoring approach means you can analyze search performance issues across both web and mobile platforms from a single dashboard. This consolidated view helps you understand whether performance problems affect all users equally or if certain platforms, devices, or geographic regions experience disproportionate issues.
 
@@ -454,15 +403,6 @@ setTimeout(() => {
     `;
     errorBanner.textContent = 'Unexpected error occurred while calculating shipping rates';
     document.body.appendChild(errorBanner);
-    
-    // Show feedback widget after error banner appears
-    setTimeout(() => {
-      if (shouldShowFeedback()) {
-        showFeedbackWidget({
-          tags: { error_type: 'cart_api_error' }
-        });
-      }
-    }, 3000);
     
     setTimeout(() => {
       errorBanner.remove();
@@ -565,15 +505,6 @@ updateQuantity(config) {
       }
       
       this.hideProgressDialog();
-      
-      // Show feedback widget for very slow operations
-      if (duration > 5000 && shouldShowFeedback()) {
-        setTimeout(() => {
-          showFeedbackWidget({
-            tags: { error_type: 'slow_database' }
-          });
-        }, 1000);
-      }
       
       if (!response.ok) {
         throw new Error(`Cart update failed: HTTP ${response.status}`);
@@ -685,11 +616,11 @@ Sentry's AI-powered assistant, Seer, analyzes this performance pattern and provi
 
 Seer's recommendations combine technical database optimizations with user experience improvements. The AI suggests implementing optimistic UI updates that immediately show cart changes while database operations complete in the background, reducing perceived waiting time even when database performance remains slow.
 
-When users encounter these extended delays, they often submit support requests or abandon their shopping sessions entirely. Sentry's user feedback widget can be programmatically triggered when cart operations exceed normal time thresholds, capturing user feedback at the moment they experience frustration.
+When users encounter these extended delays, the feedback widget provides a convenient way for them to report performance issues directly. Since the widget automatically includes session replay data and performance context, user reports come with complete technical information about the database performance problem.
 
 ![Screenshot of Sentry user feedback widget appearing over the cart page during database delays, with a feedback form asking users about their experience with cart updates](images/cart-feedback-widget.png)
 
-The user feedback widget captures user reports directly within the shopping experience, automatically associating them with the current session replay and performance data. This integration provides immediate context about user frustration levels and helps prioritize database performance improvements based on actual business impact.
+The user feedback widget remains accessible for users to report their experience with cart performance issues. The feedback is automatically associated with the current session replay and performance data, providing immediate context about user frustration levels and helping prioritize database performance improvements based on actual business impact.
 
 Session replay tools working independently would show you the visual user experience but miss the technical context about database performance. Traditional database monitoring might capture slow queries but not show you how users react to those delays. Sentry's unified platform automatically connects database performance metrics with user behavior data and error information, giving you the complete picture needed for effective optimization.
 
