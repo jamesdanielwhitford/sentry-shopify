@@ -260,9 +260,31 @@ class ProductFormComponent extends Component {
           );
         }
       })
-      .catch((error) => {
-        console.error(error);
-      })
+      .catch(error => {
+        console.error('Shipping rates API failed:', error);
+        
+        const errorBanner = document.createElement('div');
+        errorBanner.className = 'cart-error-banner';
+        errorBanner.style.cssText = `
+          background: #dc3545;
+          color: white;
+          padding: 1rem;
+          text-align: center;
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          z-index: 9999;
+        `;
+        errorBanner.textContent = 'Unexpected error occurred while calculating shipping rates';
+        document.body.appendChild(errorBanner);
+        
+        setTimeout(() => {
+          errorBanner.remove();
+        }, 5000);
+        
+        throw error;
+      });
       .finally(() => {
         // add more thing to do in here if needed.
         cartPerformance.measureFromEvent('add:user-action', event);

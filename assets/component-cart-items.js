@@ -136,23 +136,31 @@ progressDialog.innerHTML = '<div>Updating cart...</div><div style="margin-top: 1
 document.body.appendChild(progressDialog);
 
 // Add 8.5 second delay to simulate slow database
-setTimeout(() => {
-  fetch(`${Theme.routes.cart_change_url}`, fetchConfig('json', { body }))
-    .then((response) => {
-      if (typeof Sentry !== 'undefined') {
-        Sentry.addBreadcrumb({
-          message: 'Slow cart update detected',
-          level: 'warning',
-          data: {
-            duration: '8.5s',
-            expected_duration: '< 1s'
-          }
-        });
-        Sentry.captureException(new Error('Database query took 8.5+ seconds - investigate connection pool'));
-      }
-      progressDialog.remove();
-      return response.text();
-    })
+const startTime = performance.now();
+
+fetch(`${Theme.routes.cart_change_url}`, fetchConfig('json', { body }))
+  .then((response) => {
+    const duration = performance.now() - startTime;
+    
+    if (duration > 3000) {
+      Sentry.addBreadcrumb({
+        message: 'Cart update slower than expected',
+        data: {
+          duration: `${Math.round(duration)}ms`,
+          line: line,
+          quantity: quantity
+        }
+      });
+    }
+    
+    progressDialog.remove();
+    
+    if (!response.ok) {
+      throw new Error(`Cart update failed: HTTP ${response.status}`);
+    }
+    
+    return response.text();
+  })
     .then((responseText) => {
       const parsedResponseText = JSON.parse(responseText);
       resetShimmer(this);
@@ -183,7 +191,7 @@ setTimeout(() => {
       this.#enableCartItems();
       cartPerformance.measureFromMarker(cartPerformaceUpdateMarker);
     });
-}, 8500);
+
   }
 
   /**

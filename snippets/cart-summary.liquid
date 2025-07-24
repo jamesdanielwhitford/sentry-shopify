@@ -103,16 +103,41 @@
         spinner.style.display = 'inline-block';
         buttonText.textContent = 'Calculating shipping...';
         
-        setTimeout(() => {
-          if (typeof Sentry !== 'undefined') {
-            Sentry.captureException(new Error('Shipping rates API timeout after 12 seconds'));
-          }
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 12000);
+
+        fetch('/cart/shipping_rates.json', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            shipping_address: {
+              zip: '12345',
+              country: 'US',
+              province: 'CA'
+            }
+          })
+        })
+        .then(response => {
+          clearTimeout(timeoutId);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          return response.json();
+        })
+        .catch(error => {
+          clearTimeout(timeoutId);
+          console.error('Shipping calculation failed:', error);
+          
           checkoutBtn.disabled = false;
           spinner.style.display = 'none';
           buttonText.style.display = 'inline-block';
           buttonText.textContent = 'Try Again - Shipping Error';
           checkoutBtn.style.backgroundColor = '#dc3545';
-        }, 12000);
+          
+          throw error;
+        });
       });
     }
   });
