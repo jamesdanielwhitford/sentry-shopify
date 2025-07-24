@@ -26,13 +26,15 @@ In your Shopify admin, navigate to "Online Store" then "Themes" then "Actions" t
 
 ```html
 <script
-  src="https://js.sentry-cdn.com/YOUR_DSN_HERE.min.js"
+  src="https://browser.sentry-cdn.com/9.40.0/bundle.tracing.replay.feedback.min.js"
+  integrity="sha384-Pe41llaXfNg82Pkv5LMIFFis6s9XOSxijOH52r55t4AU9mzbm6ZzQ/I0Syp8hkk9"
   crossorigin="anonymous"
 ></script>
 
 <script>
   Sentry.onLoad(function() {
     Sentry.init({
+    dsn: "YOUR_DSN_HERE",
       initialScope: {
         tags: {
           store: "{{ shop.name }}",
@@ -55,6 +57,17 @@ In your Shopify admin, navigate to "Online Store" then "Themes" then "Actions" t
       tracesSampleRate: 1.0,
       replaysSessionSampleRate: 1.0,
       replaysOnErrorSampleRate: 1.0,
+      
+      integrations: [
+        Sentry.feedbackIntegration({
+          colorScheme: "system",
+          enableScreenshot: true,
+          showBranding: false,
+          showName: true,
+          showEmail: true,
+          isRequiredEmail: true,
+        }),
+      ],
       
       beforeSend(event) {
         if (typeof window !== 'undefined' && window.cart) {
@@ -80,7 +93,49 @@ In your Shopify admin, navigate to "Online Store" then "Themes" then "Actions" t
 </script>
 ```
 
-Replace `YOUR_DSN_HERE` with your actual Sentry project DSN. This configuration captures 100% of transactions and sessions for testing purposes. The configuration automatically adds ecommerce context to all events, including cart information, customer details, and page-specific data that becomes crucial when debugging issues. For comprehensive setup guidance, check out the [getting started with session replay](https://blog.sentry.io/getting-started-with-session-replay/) guide.
+Replace `YOUR_DSN_HERE` with your actual Sentry project DSN. This configuration captures 100% of transactions and sessions for testing purposes. The configuration automatically adds ecommerce context to all events, including cart information, customer details, and page-specific data that becomes crucial when debugging issues. The feedback integration enables user feedback collection with screenshot support and automatically integrates with session replay to capture up to 30 seconds of user activity before feedback submission. For comprehensive setup guidance, check out the [getting started with session replay](https://blog.sentry.io/getting-started-with-session-replay/) guide.
+
+## Setting up the User Feedback Widget
+
+The User Feedback Widget allows you to collect feedback from users during error scenarios or at any time during their shopping experience. The widget integrates seamlessly with session replay, automatically capturing user session data when feedback is submitted.
+
+Add this helper function to your theme's JavaScript to programmatically trigger the feedback widget:
+
+```html
+<script>
+// Add this function to trigger the feedback widget
+function showFeedbackWidget(context = {}) {
+  const feedbackIntegration = Sentry.getClient().getIntegration('Feedback');
+  if (feedbackIntegration) {
+    // Add context tags before showing the widget
+    Object.keys(context.tags || {}).forEach(key => {
+      Sentry.setTag(key, context.tags[key]);
+    });
+    
+    feedbackIntegration.openDialog();
+  }
+}
+
+// Prevent showing feedback too frequently
+function shouldShowFeedback() {
+  const lastFeedback = localStorage.getItem('last_feedback_time');
+  if (lastFeedback && Date.now() - parseInt(lastFeedback) < 300000) { // 5 minutes
+    return false;
+  }
+  return true;
+}
+
+// Track when feedback is submitted
+Sentry.addEventProcessor((event) => {
+  if (event.type === 'feedback') {
+    localStorage.setItem('last_feedback_time', Date.now().toString());
+  }
+  return event;
+});
+</script>
+```
+
+The feedback widget requires browsers that support Shadow DOM and the Dialog element. Modern browsers including Chrome, Firefox, Safari, and Edge support these features. When users submit feedback, they can optionally include screenshots which count toward your Sentry attachments quota (1GB included with all plans, approximately 2500 screenshots).
 
 ## Identifying user frustration during checkout failures
 
@@ -159,6 +214,15 @@ document.addEventListener('DOMContentLoaded', function() {
         buttonText.textContent = 'Try Again - Shipping Error';
         checkoutBtn.style.backgroundColor = '#dc3545';
         
+        // Show feedback widget after checkout failure
+        setTimeout(() => {
+          if (shouldShowFeedback()) {
+            showFeedbackWidget({
+              tags: { error_type: 'checkout_timeout' }
+            });
+          }
+        }, 2000);
+        
         throw error;
       });
     });
@@ -203,7 +267,7 @@ Sentry's AI-powered assistant, Seer, analyzes this pattern across multiple sessi
 
 Seer's recommendations combine technical solutions with user experience improvements. The AI suggests implementing client-side timeout handling, adding progress indicators with estimated completion times, and providing alternative shipping options when the primary API is slow. These suggestions come from analyzing user behavior patterns across multiple session replays.
 
-When users encounter this checkout problem, they often submit feedback through your support channels. Sentry's user feedback widget can capture these reports directly within your application, automatically associating them with the current session replay and performance data. This integration eliminates the manual work typically required to connect user complaints with technical debugging information.
+When users encounter this checkout problem, they often submit feedback through your support channels. Sentry's user feedback widget can be programmatically triggered during these checkout failures, automatically associating user reports with the current session replay and performance data. This integration eliminates the manual work typically required to connect user complaints with technical debugging information.
 
 ## Debugging search performance across web and mobile platforms
 
@@ -247,6 +311,15 @@ async #getSearchResults(searchTerm) {
       
       if (abortController.signal.aborted) return;
       if (error.name === 'AbortError') {
+        // Show feedback widget for search timeout
+        setTimeout(() => {
+          if (shouldShowFeedback()) {
+            showFeedbackWidget({
+              tags: { error_type: 'search_timeout' }
+            });
+          }
+        }, 1000);
+        
         throw new Error('Search request aborted after 8 second timeout');
       }
       throw error;
@@ -278,7 +351,7 @@ The performance monitoring data for this scenario shows the search API timeout o
 
 This performance trace connects the technical problem (aborted search request) with the user experience captured in session replay. You can see that while the search operation was aborted after 8 seconds, the user started exhibiting frustration behaviors after just 2-3 seconds of waiting.
 
-When users encounter slow search performance, they often submit feedback through your application's support channels. Sentry's [user feedback widget](https://blog.sentry.io/user-feedback-widget-for-mobile-apps/) can be configured to appear automatically when search operations exceed normal time thresholds, capturing user reports at the moment they experience the problem.
+When users encounter slow search performance, they often submit feedback through your application's support channels. Sentry's [user feedback widget](https://blog.sentry.io/user-feedback-widget-for-mobile-apps/) can be programmatically triggered when search operations exceed normal time thresholds, capturing user reports at the moment they experience the problem.
 
 ![Screenshot of Sentry user feedback widget appearing in the application interface during slow search performance, with the feedback form overlaying the search results area](images/search-feedback-widget.png)
 
@@ -338,6 +411,15 @@ setTimeout(() => {
     `;
     errorBanner.textContent = 'Unexpected error occurred while calculating shipping rates';
     document.body.appendChild(errorBanner);
+    
+    // Show feedback widget after error banner appears
+    setTimeout(() => {
+      if (shouldShowFeedback()) {
+        showFeedbackWidget({
+          tags: { error_type: 'cart_api_error' }
+        });
+      }
+    }, 3000);
     
     setTimeout(() => {
       errorBanner.remove();
@@ -440,6 +522,15 @@ updateQuantity(config) {
       }
       
       this.hideProgressDialog();
+      
+      // Show feedback widget for very slow operations
+      if (duration > 5000 && shouldShowFeedback()) {
+        setTimeout(() => {
+          showFeedbackWidget({
+            tags: { error_type: 'slow_database' }
+          });
+        }, 1000);
+      }
       
       if (!response.ok) {
         throw new Error(`Cart update failed: HTTP ${response.status}`);
@@ -551,7 +642,7 @@ Sentry's AI-powered assistant, Seer, analyzes this performance pattern and provi
 
 Seer's recommendations combine technical database optimizations with user experience improvements. The AI suggests implementing optimistic UI updates that immediately show cart changes while database operations complete in the background, reducing perceived waiting time even when database performance remains slow.
 
-When users encounter these extended delays, they often submit support requests or abandon their shopping sessions entirely. Sentry's user feedback widget can be configured to appear automatically when cart operations exceed normal time thresholds, capturing user feedback at the moment they experience frustration.
+When users encounter these extended delays, they often submit support requests or abandon their shopping sessions entirely. Sentry's user feedback widget can be programmatically triggered when cart operations exceed normal time thresholds, capturing user feedback at the moment they experience frustration.
 
 ![Screenshot of Sentry user feedback widget appearing over the cart page during database delays, with a feedback form asking users about their experience with cart updates](images/cart-feedback-widget.png)
 
