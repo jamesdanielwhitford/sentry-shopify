@@ -145,7 +145,7 @@ Replace `YOUR_DSN_HERE` with your actual Sentry project DSN. This configuration 
 
 ![Sentry user feedback widget appearing as a purple feedback button in the bottom-right corner of a Shopify store.](images/feedback-widget-setup.png)
 
-## Identify user frustration during checkout failures
+## Identifying user frustration patterns during checkout failures
 
 Now we will demonstrate how Session Replay reveals user behavior patterns, then connect those insights to error tracking and user feedback to show how Sentry's unified platform works together.
 
@@ -232,7 +232,7 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 ```
 
-This wil make an itentionally slow API call when the user clicks the checkouit button on the `/cart` page. 
+This will make an intentionally slow API call when the user clicks the checkout button on the `/cart` page. 
 
 Add some products to your cart and navigate to the `/cart` page. Click the **Checkout** button to trigger the error.
 
@@ -270,117 +270,161 @@ This means when a customer reports an issue, you immediately have:
 - **User context** including their feedback about the problem
 - **Business impact** data like cart value and customer information
 
-## Investigating API errors with complete user context
+## Pinpointing performance bottlenecks with distributed tracing
 
-API integration problems represent some of the most challenging ecommerce debugging scenarios because they often occur after apparently successful user actions, creating confusion about what actually failed. This scenario demonstrates how Sentry's unified monitoring platform connects API errors with the complete user journey, eliminating the guesswork typically involved in debugging integration issues.
+Database performance issues create some of the most frustrating ecommerce experiences because they make interfaces feel completely broken to users. This scenario demonstrates how Sentry's unified monitoring platform connects slow database operations with their actual impact on user behavior, helping you prioritize performance optimizations based on real user experience data rather than just technical metrics.
 
-Open the `assets/product-form.js` file find the second instance of this line of code:
-
-```js
- this.dispatchEvent(
-  new CartAddEvent({}, id.toString(), {
-    source: 'product-form-component',
-    itemCount: Number(formData.get('quantity')) || Number(this.dataset.quantityDefault),
-    productId: this.dataset.productId,
-    sections: response.sections,
-  })
-);
-```
-
-Add this code just below:
+Open the `assets/cart.js` file and find the `updateQuantity` method. Replace it with this enhanced version that simulates slow database operations:
 
 ```javascript
-setTimeout(() => {
-  const problematicQuery = {
-    cart: {
-      id: window.cart?.id,
-      estimatedShipping: true,
-      futureDeliveryOptions: true,
-      carbonNeutralOptions: true,
-      quantumShipping: true
-    }
-  };
-  
-  fetch(`/cart/shipping_rates.json`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Requested-With': 'XMLHttpRequest'
-    },
-    body: JSON.stringify(problematicQuery)
-  })
-  .then(response => {
-    if (!response.ok) {
-      throw new Error(`Shipping API error: ${response.status}`);
-    }
-    return response.json();
-  })
-  .catch(error => {
-    console.error('Shipping rates API failed:', error);
-    
-    const errorBanner = document.createElement('div');
-    errorBanner.className = 'cart-error-banner';
-    errorBanner.style.cssText = `
-      background: #dc3545;
-      color: white;
-      padding: 1rem;
-      text-align: center;
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      z-index: 9999;
-    `;
-    errorBanner.textContent = 'Unexpected error occurred while calculating shipping rates';
-    document.body.appendChild(errorBanner);
-    
-    setTimeout(() => {
-      errorBanner.remove();
-    }, 5000);
-    
-    throw error;
+updateQuantity(line, quantity, event, name, variantId) {
+  this.enableLoading(line);
+
+  const body = JSON.stringify({
+    line,
+    quantity,
+    sections: this.getSectionsToRender().map((section) => section.section),
+    sections_url: window.location.pathname,
   });
-}, 2000);
+
+  this.showProgressDialog('Updating cart...');
+
+  // Simulate slow database operation using httpbin delay
+  const startTime = performance.now();
+  
+  fetch('https://httpbin.org/delay/12')
+    .then(() => {
+      // After the delay, make the actual cart update
+      return fetch(`${routes.cart_change_url}`, { ...fetchConfig(), ...{ body } });
+    })
+    .then((response) => {
+      const duration = performance.now() - startTime;
+      
+      if (typeof Sentry !== 'undefined') {
+        Sentry.addBreadcrumb({
+          message: 'Slow cart update detected',
+          level: 'warning',
+          data: {
+            duration: `${Math.round(duration)}ms`,
+            expected_duration: '< 1000ms'
+          }
+        });
+        
+        if (duration > 10000) {
+          Sentry.captureException(new Error(`Cart update took ${Math.round(duration)}ms - slow database query`));
+        }
+      }
+      
+      this.hideProgressDialog();
+      return response.text();
+    })
+    .then((state) => {
+      const parsedState = JSON.parse(state);
+      this.classList.toggle('is-empty', parsedState.item_count === 0);
+      const cartDrawerWrapper = document.querySelector('cart-drawer');
+      const cartFooter = document.getElementById('main-cart-footer');
+
+      if (cartFooter) cartFooter.classList.toggle('is-empty', parsedState.item_count === 0);
+      if (cartDrawerWrapper) cartDrawerWrapper.classList.toggle('is-empty', parsedState.item_count === 0);
+      
+      this.getSectionsToRender().forEach((section) => {
+        const elementToReplace =
+          document.getElementById(section.id).querySelector(section.selector) || document.getElementById(section.id);
+        elementToReplace.innerHTML = this.getSectionInnerHTML(parsedState.sections[section.section], section.selector);
+      });
+      
+      this.updateLiveRegions(line, parsedState.item_count);
+      const lineItem = document.getElementById(`CartItem-${line}`) || document.getElementById(`CartDrawer-Item-${line}`);
+      if (lineItem && lineItem.querySelector(`[name="${name}"]`)) {
+        cartDrawerWrapper ? this.disableLoading(line) : lineItem.querySelector(`[name="${name}"]`).focus();
+      } else if (parsedState.item_count === 0 && cartDrawerWrapper) {
+        this.disableLoading(line);
+      }
+      if (!cartDrawerWrapper) {
+        this.disableLoading(line);
+      }
+    })
+    .catch(() => {
+      this.querySelectorAll('.loading__spinner').forEach((overlay) => overlay.classList.add('hidden'));
+      const errors = document.getElementById('cart-errors') || document.getElementById('CartDrawer-CartErrors');
+      errors.textContent = window.cartStrings.error;
+      this.hideProgressDialog();
+    });
+},
+
+showProgressDialog(message) {
+  let dialog = document.getElementById('cart-progress-dialog');
+  if (!dialog) {
+    dialog = document.createElement('div');
+    dialog.id = 'cart-progress-dialog';
+    dialog.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: white;
+      padding: 2rem;
+      border-radius: 8px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+      z-index: 10000;
+      text-align: center;
+    `;
+    document.body.appendChild(dialog);
+  }
+  
+  dialog.innerHTML = `
+    <div class="loading__spinner"></div>
+    <p style="margin-top: 1rem;">${message}</p>
+  `;
+  dialog.style.display = 'block';
+},
+
+hideProgressDialog() {
+  const dialog = document.getElementById('cart-progress-dialog');
+  if (dialog) {
+    dialog.style.display = 'none';
+  }
+}
 ```
 
-This code demonstrates a realistic API integration problem where the frontend tries to use shipping API fields that don't exist in the current API version.
+This implementation shows a progress dialog during cart updates and introduces a 12-second delay to simulate database performance problems. Navigate to your cart page and try changing the quantity of any item using the plus or minus buttons.
 
-Add any product to your cart, addition appears successful, the cart updates normally, then an unexpected error banner appears after a brief delay.
+### Understanding Performance Impact Through Session Replay
 
-![Product page showing a red error banner appearing at the top of the screen](images/cart-api-error-sequence.png)
+When you view this scenario in Sentry's session replay player, the complete user journey becomes clear. The replay shows the user clicking to update cart quantities, the progress dialog appearing, then the extended wait time before completion.
 
-### Understanding User Confusion Through Session Replay
+![Screenshot of Sentry session replay player showing the complete cart update sequence with timeline markers indicating the quantity change, progress dialog, and extended wait time](images/cart-performance-replay-timeline.png)
 
-When you view this scenario in Sentry's session replay player, the complete user journey becomes clear. The replay shows the successful product addition, brief normal browsing, then the sudden appearance of the error banner.
+The session replay timeline reveals how users react to performance bottlenecks differently than error failures. While users might retry failed operations, slow operations often lead to abandonment as users assume the interface is broken. This behavioral insight helps prioritize which performance issues have the greatest business impact.
 
-![Screenshot of Sentry session replay player showing the complete cart addition sequence with timeline markers indicating the product addition, cart update, and delayed error appearance](images/cart-error-replay-timeline.png)
+### Performance Monitoring for Database Bottlenecks
 
-The session replay timeline reveals the critical insight that the error isn't related to the initial product addition but to a subsequent API call that failed. This context helps developers understand the root cause and prevents them from investigating the wrong parts of the application.
+Performance monitoring for this scenario shows the slow database operation in the network trace, with timing information that helps developers understand the technical aspects of the performance problem.
 
-The unified monitoring approach means you can immediately jump from the error details to watching exactly how users experienced the problem. The session replay shows that users are often confused by this type of delayed error, sometimes attempting to add items to their cart multiple times because they're uncertain whether the first attempt succeeded.
+![Screenshot of Sentry Performance dashboard showing the slow cart update request with timing information and database query details](images/cart-performance-trace.png)
 
-### Performance Monitoring for API Integration Issues
+The performance trace shows the cascade of slow operations that lead to poor user experience. You can see the initial user action, the delayed database query, and the subsequent UI updates all connected in a single view. This distributed tracing capability is essential for understanding complex performance issues that span multiple services and operations.
 
-Performance monitoring for this scenario shows the failed API call in the network trace, with timing information and response codes that help developers understand the technical aspects of the integration problem.
+### Mobile Session Replay for Performance Issues
 
-![Screenshot of Sentry Performance dashboard showing the failed shipping rates API call with HTTP error codes and response timing information](images/cart-api-performance-trace.png)
+Sentry's mobile session replay capabilities through React Native provide the same unified experience for users accessing your ecommerce store through mobile apps. Performance issues often feel even more frustrating on mobile devices where users expect instant responsiveness.
 
-User session replay software tools that work in isolation would show you the visual user experience but miss the technical context about why the error occurred. Traditional API monitoring might capture the failed request but not show you how users reacted to the error. Sentry's unified platform automatically connects these different data types, giving you the complete picture needed for effective debugging.
+![Screenshot of Sentry mobile session replay showing cart update performance issues on a mobile device interface](images/mobile-session-replay-performance.png)
 
-### AI-Powered Debugging Assistance
+Mobile session replay captures touch interactions, device orientation changes, and app lifecycle events alongside performance data, giving you complete context about how database slowness affects mobile users specifically. The tool to replay user sessions in web browser and mobile environments provides consistent debugging capabilities across all platforms where customers interact with your store.
 
-Sentry's AI-powered assistant, Seer, analyzes this pattern across multiple sessions and provides specific recommendations for improving API integration handling. The AI recognizes that delayed errors after successful operations create user confusion and suggests better error handling strategies.
+### AI-Powered Performance Optimization
 
-![Screenshot of Sentry Seer AI interface showing recommendations for the cart API integration issue, including error handling improvements and user experience suggestions](images/seer-cart-api-recommendations.png)
+Sentry's AI-powered assistant, Seer, analyzes performance patterns across multiple sessions and provides specific recommendations for optimizing database operations and user experience during slow operations.
 
-Seer's recommendations combine technical API fixes with user experience improvements. The AI suggests implementing proper error boundaries that catch integration failures before they reach users, adding validation for API field compatibility, and providing clearer feedback when background operations fail. These suggestions come from analyzing user behavior patterns across multiple session replays.
+![Screenshot of Sentry Seer AI interface showing recommendations for the cart performance issue, including database optimization suggestions and user experience improvements](images/seer-performance-recommendations.png)
+
+Seer's recommendations combine technical database optimizations with user experience improvements. The AI suggests implementing optimistic UI updates that make interfaces feel responsive during slow operations, adding proper loading states that keep users informed, and optimizing database queries to reduce actual response times. These suggestions come from analyzing user behavior patterns across multiple session replays and identifying what keeps users engaged during performance delays.
 
 The AI recognizes specific patterns in the session replay data:
-- Users exhibit confusion when errors appear after successful actions
-- Many users attempt the same action multiple times when delayed errors occur
-- Clear error messaging during the actual user action reduces confusion
-
-Based on these insights, Seer provides actionable recommendations that address both the technical integration problems and the user experience issues they create. This type of integration problem often affects only certain user actions or specific product configurations, making it difficult to reproduce in development environments. Session replay data helps you understand the specific conditions that trigger these API errors, enabling more targeted testing and verification of fixes.
+- Users abandon operations when progress indicators are unclear
+- Optimistic UI updates reduce perceived performance issues
+- Clear progress communication improves user patience during slow operations
 
 ## The unified advantage: connecting session replay with complete monitoring
 
@@ -404,7 +448,7 @@ User feedback integration completes the unified monitoring picture by connecting
 
 Session replay transforms ecommerce debugging from guesswork into data-driven investigation. By combining visual user experience data with performance monitoring and error tracking, you gain complete context about problems that affect your customers' shopping experience, enabling faster resolution and better prevention of similar issues.
 
-The checkout timeout scenario demonstrated how session replay reveals user frustration patterns, error tracking provides technical context about API failures, and user feedback captures customer sentiment—all connected in a single platform. The cart API integration scenario showed how session replay data connects with performance traces to identify the root cause of confusing user experiences, while AI recommendations provide actionable next steps based on actual user behavior patterns.
+The checkout timeout scenario demonstrated how session replay reveals user frustration patterns, error tracking provides technical context about API failures, and user feedback captures customer sentiment—all connected in a single platform. The database performance scenario showed how session replay data connects with performance traces to identify the root cause of slow user experiences, while AI recommendations provide actionable next steps based on actual user behavior patterns.
 
 Start implementing session replay on your most critical user flows, then expand coverage based on the debugging value you discover. Focus on scenarios where traditional logging provides insufficient context about user experience problems, particularly during checkout processes and cart operations where user frustration directly impacts revenue.
 
