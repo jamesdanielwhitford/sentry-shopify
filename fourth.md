@@ -147,11 +147,11 @@ Before implementing error scenarios, let's verify that our monitoring setup work
 
 The feedback widget serves as your direct connection to customer experience issues. When users encounter problems during their shopping journey, they can immediately report issues while the context is fresh, and Sentry automatically associates their feedback with the technical data needed for debugging.
 
-## Setting up the checkout error scenario
+## Setting up the complex checkout flow scenario
 
-Now we'll create a realistic checkout failure that demonstrates how session replay connects user frustration with technical root causes. This scenario simulates a shipping rates API that takes too long to respond and then fails completely, creating the kind of checkout abandonment issues that directly impact ecommerce revenue.
+Now we'll create a comprehensive checkout flow that demonstrates how session replay connects complex performance issues with user experience problems. This scenario simulates a realistic multi-step checkout process with multiple potential failure points, performance bottlenecks, and proper instrumentation to show how technical issues cascade into user frustration.
 
-We need to properly modify the existing `snippets/cart-summary.liquid` file without breaking its Liquid template structure. The key is to enhance the existing checkout button and add our error simulation logic after the existing stylesheet section.
+Modern ecommerce checkout flows involve multiple services working together: inventory validation, tax calculation, shipping rates, discount application, payment processing, and order creation. When any of these steps fails or performs slowly, users experience checkout abandonment without understanding why. Our implementation creates a realistic scenario where multiple services can fail independently, helping demonstrate how Sentry's unified monitoring reveals the complete picture.
 
 ### Step 1: Modify the Existing Button Structure
 
@@ -190,9 +190,9 @@ Replace it with:
 </button>
 ```
 
-### Step 2: Add JavaScript After the Existing Stylesheet
+### Step 2: Add Comprehensive Checkout Flow After the Existing Stylesheet
 
-Tha file has a `{% stylesheet %}` section at the bottom. Add this JavaScript section right **after** the closing `{% endstylesheet %}` tag:
+The file has a `{% stylesheet %}` section at the bottom. Add this JavaScript section right **after** the closing `{% endstylesheet %}` tag:
 
 ```html
 <script>
@@ -200,7 +200,6 @@ document.addEventListener('DOMContentLoaded', function() {
   const checkoutBtn = document.getElementById('checkout');
   if (checkoutBtn && checkoutBtn.form && checkoutBtn.form.id === 'cart-form') {
     checkoutBtn.addEventListener('click', function(e) {
-      // Only intercept if cart has items
       if ({{ cart.item_count }} === 0) return;
       
       e.preventDefault();
@@ -215,162 +214,475 @@ document.addEventListener('DOMContentLoaded', function() {
       buttonText.style.display = 'none';
       spinner.style.display = 'inline-block';
       
-      // Simulate realistic shipping calculation that times out
-      calculateShippingForCheckout()
+      // Start the instrumented checkout flow
+      processComplexCheckout()
         .then(() => {
-          // Success - proceed to actual checkout
           window.location.href = '{{ routes.cart_url }}/checkout';
         })
         .catch(error => {
-          // Handle shipping calculation failure
-          handleShippingError(error, checkoutBtn, buttonText, spinner);
+          handleCheckoutError(error, checkoutBtn, buttonText, spinner);
         });
     });
   }
 });
 
-async function calculateShippingForCheckout() {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000);
-  
-  try {
-    const response = await fetch('{{ routes.cart_url }}/shipping_rates.json', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Requested-With': 'XMLHttpRequest'
-      },
-      body: JSON.stringify({
-        shipping_address: {
-          country: 'US',
-          province: 'CA',
-          zip: '90210'
-        }
-      }),
-      signal: controller.signal
-    });
-    
-    clearTimeout(timeoutId);
-    
-    if (!response.ok) {
-      throw new Error(`Shipping service unavailable (HTTP ${response.status})`);
-    }
-    
-    return await response.json();
-  } catch (error) {
-    clearTimeout(timeoutId);
-    
-    if (error.name === 'AbortError') {
-      throw new Error('Shipping calculation timed out after 8 seconds');
-    }
-    throw error;
+async function processComplexCheckout() {
+  // Check if Sentry is available
+  if (typeof Sentry === 'undefined') {
+    console.warn('Sentry not available, falling back to basic flow');
+    return basicCheckoutFlow();
   }
+
+  return await Sentry.startSpan(
+    { 
+      name: "Complete Checkout Flow", 
+      op: "checkout.process",
+      attributes: {
+        "checkout.cart_total": {{ cart.total_price | divided_by: 100.0 }},
+        "checkout.item_count": {{ cart.item_count }},
+        "checkout.currency": "{{ cart.currency.iso_code }}"
+      }
+    },
+    async (checkoutSpan) => {
+      const checkoutData = {
+        cartTotal: {{ cart.total_price | divided_by: 100.0 }},
+        itemCount: {{ cart.item_count }},
+        currency: '{{ cart.currency.iso_code }}',
+        startTime: Date.now(),
+        items: [
+          {% for item in cart.items %}
+          {
+            id: {{ item.product_id }},
+            variantId: {{ item.variant_id }},
+            quantity: {{ item.quantity }},
+            price: {{ item.price | divided_by: 100.0 }}
+          }{% unless forloop.last %},{% endunless %}
+          {% endfor %}
+        ]
+      };
+
+      try {
+        // Step 1: Validate cart items and inventory
+        const validationResult = await Sentry.startSpan(
+          { 
+            name: "Validate Cart Items", 
+            op: "checkout.validate",
+            attributes: {
+              "validation.item_count": checkoutData.itemCount
+            }
+          },
+          () => validateCartItems(checkoutData)
+        );
+        
+        // Step 2: Calculate taxes (depends on validation)
+        const taxResult = await Sentry.startSpan(
+          { 
+            name: "Calculate Taxes", 
+            op: "checkout.tax",
+            attributes: {
+              "tax.cart_total": checkoutData.cartTotal,
+              "tax.calculation_type": "api"
+            }
+          },
+          () => calculateTaxes(checkoutData, validationResult)
+        );
+        
+        // Step 3: Parallel operations (shipping + discounts)
+        const [shippingResult, discountResult] = await Promise.all([
+          Sentry.startSpan(
+            { 
+              name: "Calculate Shipping Rates", 
+              op: "checkout.shipping",
+              attributes: {
+                "shipping.providers_count": 3,
+                "shipping.destination": "US"
+              }
+            },
+            () => calculateShippingRates(checkoutData)
+          ),
+          Sentry.startSpan(
+            { 
+              name: "Apply Discounts", 
+              op: "checkout.discounts",
+              attributes: {
+                "discount.cart_total": checkoutData.cartTotal
+              }
+            },
+            () => applyDiscounts(checkoutData)
+          )
+        ]);
+        
+        // Step 4: Payment authorization
+        const finalTotal = checkoutData.cartTotal + taxResult.taxAmount + shippingResult.selected.cost - discountResult.discountAmount;
+        const paymentResult = await Sentry.startSpan(
+          { 
+            name: "Authorize Payment", 
+            op: "checkout.payment",
+            attributes: {
+              "payment.amount": finalTotal,
+              "payment.currency": checkoutData.currency,
+              "payment.method": "credit_card"
+            }
+          },
+          () => authorizePayment({
+            ...checkoutData,
+            taxes: taxResult,
+            shipping: shippingResult,
+            discounts: discountResult
+          })
+        );
+        
+        // Step 5: Create order record
+        const orderResult = await Sentry.startSpan(
+          { 
+            name: "Create Order Record", 
+            op: "checkout.order",
+            attributes: {
+              "order.final_total": finalTotal,
+              "order.processing_time_ms": Date.now() - checkoutData.startTime
+            }
+          },
+          () => createOrderRecord({
+            ...checkoutData,
+            taxes: taxResult,
+            shipping: shippingResult,
+            discounts: discountResult,
+            payment: paymentResult
+          })
+        );
+        
+        // Add success attributes to parent span
+        checkoutSpan.setAttributes({
+          "checkout.success": true,
+          "checkout.total_time_ms": Date.now() - checkoutData.startTime,
+          "checkout.final_amount": finalTotal
+        });
+        
+        return orderResult;
+        
+      } catch (error) {
+        // Mark span as failed and add error context
+        checkoutSpan.setStatus({ code: 2, message: error.message });
+        checkoutSpan.setAttributes({
+          "checkout.success": false,
+          "checkout.error_step": error.step || "unknown",
+          "checkout.error_message": error.message
+        });
+        
+        // Capture detailed error
+        Sentry.captureException(error, {
+          tags: {
+            operation: 'complex_checkout_flow',
+            checkout_step: error.step || 'unknown',
+            business_impact: 'high'
+          },
+          extra: {
+            checkout_data: checkoutData,
+            failed_at: error.step,
+            total_value: checkoutData.cartTotal,
+            processing_time: Date.now() - checkoutData.startTime
+          }
+        });
+        
+        throw error;
+      }
+    }
+  );
 }
 
-function handleShippingError(error, button, buttonText, spinner) {
-  // Capture error for monitoring (this is a critical checkout flow)
-  if (typeof Sentry !== 'undefined') {
-    Sentry.captureException(error, {
-      tags: {
-        operation: 'checkout_flow',
-        step: 'shipping_calculation'
-      },
-      extra: {
-        cart_total: '{{ cart.total_price | money_without_currency }}',
-        cart_currency: '{{ cart.currency.iso_code }}',
-        item_count: {{ cart.item_count }},
-        shipping_country: 'US'
-      }
-    });
+// Fallback for when Sentry isn't available
+async function basicCheckoutFlow() {
+  // Simple delay to simulate processing
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  if (Math.random() < 0.1) {
+    throw new Error('Basic checkout failed');
   }
-  
-  // Reset button to error state
+  return { success: true };
+}
+
+// Step 1: Cart validation with inventory check
+async function validateCartItems(checkoutData) {
+  return new Promise((resolve, reject) => {
+    setTimeout(async () => {
+      try {
+        // Simulate checking each item's availability (N operations)
+        for (let i = 0; i < checkoutData.items.length; i++) {
+          await new Promise(resolve => setTimeout(resolve, 80));
+        }
+        
+        // 10% chance of inventory issues
+        if (Math.random() < 0.1) {
+          const error = new Error('Item no longer available in inventory');
+          error.step = 'inventory_validation';
+          reject(error);
+          return;
+        }
+        
+        resolve({ 
+          validated: true, 
+          timestamp: Date.now(),
+          itemsChecked: checkoutData.items.length
+        });
+      } catch (error) {
+        error.step = 'cart_validation';
+        reject(error);
+      }
+    }, 150);
+  });
+}
+
+// Step 2: Tax calculation
+async function calculateTaxes(checkoutData, validationResult) {
+  return new Promise((resolve, reject) => {
+    setTimeout(async () => {
+      try {
+        // Simulate tax service API call (will 404 but that's fine for demo)
+        const response = await fetch('/cart/taxes.json', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            items: checkoutData.items,
+            address: { country: 'US', state: 'CA', zip: '90210' }
+          })
+        }).catch(() => {
+          // Expected to fail, use fallback calculation
+          return { ok: true };
+        });
+        
+        // 5% chance of tax calculation failure
+        if (Math.random() < 0.05) {
+          const error = new Error('Tax service temporarily unavailable');
+          error.step = 'tax_calculation';
+          reject(error);
+          return;
+        }
+        
+        const taxRate = 0.0875; // California tax rate
+        resolve({ 
+          taxRate: taxRate,
+          taxAmount: checkoutData.cartTotal * taxRate,
+          timestamp: Date.now(),
+          service: 'tax_api'
+        });
+      } catch (error) {
+        error.step = 'tax_calculation';
+        reject(error);
+      }
+    }, 280);
+  });
+}
+
+// Step 3: Shipping calculation (the intentional bottleneck)
+async function calculateShippingRates(checkoutData) {
+  return new Promise((resolve, reject) => {
+    setTimeout(async () => {
+      try {
+        const providers = ['UPS', 'FedEx', 'USPS'];
+        const rates = [];
+        
+        // Simulate API call to each shipping provider
+        for (const provider of providers) {
+          await new Promise(resolve => setTimeout(resolve, 400)); // Each takes 400ms
+          rates.push({
+            provider,
+            cost: 5.99 + Math.random() * 10,
+            days: Math.floor(Math.random() * 5) + 1
+          });
+        }
+        
+        // 15% chance of shipping service failure
+        if (Math.random() < 0.15) {
+          const error = new Error('Shipping service temporarily unavailable');
+          error.step = 'shipping_calculation';
+          reject(error);
+          return;
+        }
+        
+        resolve({
+          rates,
+          selected: rates[0], // Select cheapest option
+          timestamp: Date.now(),
+          providersChecked: providers.length
+        });
+      } catch (error) {
+        error.step = 'shipping_rates';
+        reject(error);
+      }
+    }, 1200); // This is the bottleneck - 1.2 seconds base + provider calls
+  });
+}
+
+// Step 3b: Discount application (parallel with shipping)
+async function applyDiscounts(checkoutData) {
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      const discountAmount = checkoutData.cartTotal > 50 ? 5.00 : 0;
+      resolve({
+        discountAmount,
+        discountCode: discountAmount > 0 ? 'AUTO5' : null,
+        timestamp: Date.now(),
+        eligibleForDiscount: checkoutData.cartTotal > 50
+      });
+    }, 200);
+  });
+}
+
+// Step 4: Payment authorization
+async function authorizePayment(fullCheckoutData) {
+  return new Promise((resolve, reject) => {
+    setTimeout(() => {
+      // 5% chance of payment failure
+      if (Math.random() < 0.05) {
+        const error = new Error('Payment authorization declined');
+        error.step = 'payment_authorization';
+        reject(error);
+        return;
+      }
+      
+      const finalAmount = fullCheckoutData.cartTotal + 
+                         fullCheckoutData.taxes.taxAmount + 
+                         fullCheckoutData.shipping.selected.cost - 
+                         fullCheckoutData.discounts.discountAmount;
+      
+      resolve({
+        authorizationId: 'auth_' + Math.random().toString(36).substr(2, 9),
+        amount: finalAmount,
+        timestamp: Date.now(),
+        gateway: 'stripe'
+      });
+    }, 350);
+  });
+}
+
+// Step 5: Order creation
+async function createOrderRecord(fullOrderData) {
+  return new Promise((resolve, reject) => {
+    setTimeout(() => {
+      // 2% chance of database failure
+      if (Math.random() < 0.02) {
+        const error = new Error('Order creation failed - database timeout');
+        error.step = 'order_creation';
+        reject(error);
+        return;
+      }
+      
+      resolve({
+        orderId: 'order_' + Math.random().toString(36).substr(2, 9),
+        timestamp: Date.now(),
+        totalProcessingTime: Date.now() - fullOrderData.startTime
+      });
+    }, 180);
+  });
+}
+
+function handleCheckoutError(error, button, buttonText, spinner) {
   button.disabled = false;
   spinner.style.display = 'none';
   buttonText.style.display = 'inline-block';
-  buttonText.textContent = 'Try Again - Shipping Error';
+  
+  const errorMessages = {
+    'inventory_validation': 'Item Unavailable',
+    'cart_validation': 'Cart Error',
+    'tax_calculation': 'Tax Service Error',
+    'shipping_calculation': 'Shipping Error', 
+    'shipping_rates': 'Shipping Unavailable',
+    'payment_authorization': 'Payment Declined',
+    'order_creation': 'Order Failed'
+  };
+  
+  buttonText.textContent = errorMessages[error.step] || 'Checkout Error';
   button.style.backgroundColor = '#dc3545';
   button.style.color = 'white';
   
-  // Reset button after 3 seconds
+  // Reset after 4 seconds
   setTimeout(() => {
     buttonText.textContent = '{{ 'content.checkout' | t }}';
     button.style.backgroundColor = '';
     button.style.color = '';
-  }, 3000);
+  }, 4000);
 }
 </script>
 ```
 
-This implementation creates a realistic shipping calculation failure that demonstrates how technical problems manifest as user experience issues. The API call attempts to calculate shipping rates but fails either due to timeout or server error, leaving users frustrated and unable to complete their purchase.
+This comprehensive implementation demonstrates realistic ecommerce challenges by creating a multi-step checkout process where each stage can fail independently. The code uses Sentry's performance monitoring capabilities with nested spans to track each operation's timing and success rate.
 
-The code follows production patterns by using Shopify's actual routing system with `{{ routes.cart_url }}`, including real cart data in error reports using Liquid template variables, and manually capturing the handled error with `Sentry.captureException()` since this represents a critical business flow that needs monitoring even when gracefully handled.
+**Key features of this implementation:**
 
-## Testing the error with mobile device feedback
+- **Sequential Dependencies**: Cart validation must complete before tax calculation, mirroring real checkout flows
+- **Parallel Operations**: Shipping and discount calculations run simultaneously for efficiency
+- **Performance Bottlenecks**: Shipping calculation intentionally takes 1.2+ seconds, simulating slow third-party APIs
+- **Multiple Failure Points**: Each step has realistic failure rates (inventory 10%, shipping 15%, payment 5%)
+- **Detailed Instrumentation**: Every operation is wrapped in Sentry spans with relevant attributes and timing data
 
-Add some products to your cart and navigate to the `/cart` page on both desktop and mobile devices. Click the **Checkout** button to trigger the shipping calculation error. On mobile devices, the extended loading time and eventual failure feel particularly frustrating because users expect mobile interactions to be immediate and seamless.
+The checkout flow spans demonstrate how performance issues cascade through dependent operations, while session replay captures the user experience during these delays and failures.
 
-![Screenshot of Shopify cart page on mobile showing the checkout button with loading spinner during the failed shipping calculation](images/mobile-checkout-failed.png)
+## Testing the complex checkout flow with mobile device feedback
 
-While experiencing this checkout failure on your mobile device, click the purple feedback widget to submit a report about the problem. The mobile experience makes user frustration more pronounced, and the feedback widget provides an immediate outlet for users to report checkout issues while they're actively experiencing them.
+Add several products to your cart to create a realistic checkout scenario, then navigate to the `/cart` page on both desktop and mobile devices. Click the **Checkout** button to trigger the complex checkout process. You'll notice the loading state persists longer than typical ecommerce flows, especially during the shipping calculation phase which acts as the primary bottleneck.
 
-When submitting feedback through the mobile widget, describe the checkout problem as a real user would: "Checkout button got stuck calculating shipping and then showed an error. Very frustrating when trying to buy something quickly." This realistic feedback helps demonstrate how user reports connect directly with technical debugging data.
+The checkout process may succeed after several seconds, or it may fail at any step with specific error messages like "Shipping Error" or "Payment Declined". Each failure represents a different technical issue that would require different debugging approaches in production.
+
+![Screenshot of Shopify cart page on mobile showing the checkout button with loading spinner during the complex multi-step checkout process](images/mobile-checkout-complex.png)
+
+Test the checkout flow multiple times to experience different failure scenarios. The randomized failure rates mean you'll encounter various error conditions, each providing different performance traces and error context in Sentry. While experiencing checkout failures on your mobile device, click the purple feedback widget to submit reports about the specific issues you encounter.
+
+When submitting feedback through the mobile widget, describe the problems as a real user would: "Checkout took forever to load and then failed with shipping error" or "Payment was declined even though my card works fine." This realistic feedback helps demonstrate how user reports connect directly with the detailed performance data and error traces captured by Sentry.
 
 ## Viewing user feedback in Sentry
 
-Navigate to your Sentry project dashboard and click "User Feedback" in the sidebar. You'll see the feedback submission you just created, complete with the user's description of the checkout problem and their contact information if provided.
+Navigate to your Sentry project dashboard and click "User Feedback" in the sidebar. You'll see the feedback submissions you created, each describing different aspects of the checkout experience problems. The feedback entries now connect to much more sophisticated technical data than simple API timeouts.
 
-![Screenshot of Sentry User Feedback dashboard showing the checkout error report with user description and associated technical data](images/user-feedback-dashboard.png)
+![Screenshot of Sentry User Feedback dashboard showing the complex checkout error reports with user descriptions and associated technical performance data](images/user-feedback-complex-dashboard.png)
 
-The feedback entry shows not just the user's description of the problem, but also links directly to the associated session replay and error data. This connection eliminates the traditional gap between customer support reports and technical investigation. Instead of support teams describing problems to engineering teams, you have direct access to both the user's experience and the technical root cause.
+Each feedback entry links to comprehensive performance traces showing exactly which step in the checkout process failed, how long each operation took, and what the user experienced during the entire flow. This connection eliminates guesswork about which technical issues correlate with user frustration and checkout abandonment.
 
-## Connecting feedback to session replay and technical data
+## Connecting feedback to session replay and comprehensive performance data
 
-Click on the feedback entry to see the complete context that Sentry automatically captured. The feedback detail view connects four critical pieces of information that traditionally require separate tools to correlate.
+Click on any feedback entry to see the complete context that Sentry automatically captured for the complex checkout flow. The feedback detail view now connects multiple layers of technical information that would traditionally require separate tools and manual correlation.
 
-### Mobile Session Replay
+### Mobile Session Replay with Multi-Step Process
 
-The session replay shows exactly how the checkout failure appeared on the user's mobile device. You can watch the user add items to their cart, navigate to checkout, click the button, wait through the loading state, and see the eventual error message. Mobile session replay captures touch interactions, scroll behavior, and the specific timing of user actions that led to frustration.
+The session replay shows the complete user journey through the extended checkout process. You can watch users interact with the cart, click checkout, observe the prolonged loading state, and see their reaction to different failure scenarios. Mobile session replay captures the frustration that builds during the shipping calculation delay, particularly noticeable when users expect immediate responses.
 
-![Screenshot of Sentry mobile session replay showing the complete checkout sequence from cart interaction through the shipping calculation failure](images/mobile-session-replay-checkout.png)
+![Screenshot of Sentry mobile session replay showing the complete multi-step checkout sequence with extended loading states and various failure points](images/mobile-session-replay-complex.png)
 
-Mobile session replay reveals behavior patterns unique to mobile users. Desktop users might wait patiently during loading states, but mobile users often expect immediate responses and quickly abandon slow processes. The replay shows precisely when users become frustrated and how they react to checkout delays.
+The replay reveals user behavior patterns during extended loading periods. Mobile users often switch between apps or scroll around the page while waiting, and session replay captures these context switches that indicate growing impatience with checkout performance.
 
-### Network Request Details
+### Comprehensive Performance Traces
 
-The network tab within the session replay shows the complete shipping rates API call, including request headers, payload, timing information, and the eventual failure response. You can see exactly how long the API took to respond and what error was returned.
+The performance trace now shows a waterfall of all checkout operations with nested span relationships. You can see how cart validation leads to tax calculation, how shipping and discount operations run in parallel, and where the process bottlenecks or fails completely.
 
-![Screenshot of Sentry network details showing the shipping rates API request timing, headers, and failure response with HTTP status code](images/network-request-details.png)
+![Screenshot of Sentry performance trace showing the complete checkout flow waterfall with nested spans for validation, tax calculation, shipping, discounts, payment, and order creation](images/performance-trace-complex.png)
 
-Network details reveal whether checkout failures stem from slow API responses, server errors, or client-side timeouts. In this case, the shipping rates API either times out after 8 seconds or returns an HTTP error status, providing clear technical context for the user experience problem captured in the session replay.
+Performance traces reveal the cascade effect of slow operations. When shipping calculation takes 2+ seconds, the entire checkout experience feels sluggish even if other operations complete quickly. The trace shows exactly which operations consume the most time and how parallel processing helps mitigate some delays.
 
-### Performance Trace
+### Detailed Error Context with Business Impact
 
-The performance trace shows the complete transaction timeline from user interaction through API failure. Timing data reveals that shipping calculation requests should complete in under 2 seconds, but this particular request either times out or fails completely, creating an unacceptable user experience.
+Error details now include rich context about which step failed, what the cart contents were, how long the process had been running, and what the business impact represents. Each error includes the complete checkout state, making it possible to reproduce issues or understand why specific combinations of cart contents trigger failures.
 
-![Screenshot of Sentry performance trace showing the checkout transaction timeline with slow shipping calculation API highlighted](images/performance-trace-checkout.png)
+![Screenshot of Sentry error details showing complex checkout failure with complete context including cart data, processing time, failed step, and business impact assessment](images/error-details-complex.png)
 
-Performance tracing connects user actions with backend operations, showing how API slowness cascades into user experience problems. The trace reveals not just that the shipping calculation failed, but how that failure fits into the broader context of checkout performance.
+Error context transforms generic failure messages into actionable debugging information. Instead of knowing that "checkout failed," you have specific details about cart value, processing time, which integration failed, and how many customers might be affected by similar issues.
 
-### Error Context and Stack Trace
+### Network Requests and Third-Party Integration Monitoring
 
-The error details show the exact JavaScript exception captured when the shipping calculation fails, complete with stack trace information and the custom context added during error capture. Error context includes cart information, shipping address, and API endpoint details that help with debugging.
+The network tab shows all API calls made during the checkout process, including the intentional tax service call that demonstrates how to monitor third-party integrations. You can see request timing, headers, payloads, and responses for each step in the checkout flow.
 
-![Screenshot of Sentry error details showing the shipping calculation timeout error with full stack trace and ecommerce context](images/error-details-context.png)
+![Screenshot of Sentry network monitoring showing API calls during checkout including tax service, shipping providers, and payment gateway requests with timing and response data](images/network-requests-complex.png)
 
-Error context transforms generic timeout messages into actionable debugging information. Instead of just knowing that "something failed during checkout," you have specific details about cart contents, shipping calculations, and API endpoints that enable targeted fixes.
+Network monitoring reveals how third-party service performance affects user experience. Slow shipping provider APIs or unreliable tax calculation services directly impact checkout completion rates, and Sentry's integration shows exactly where these dependencies create user experience problems.
 
 ## The complete debugging picture
 
-The checkout failure scenario demonstrated why session replay technology becomes exponentially more valuable when integrated with performance monitoring and error tracking in a unified platform. Traditional approaches force you to manually correlate data across different systems for user session replay software, performance analysis, and error investigation, often leading to incomplete understanding of user experience problems.
+The complex checkout flow scenario demonstrates why unified monitoring becomes essential for modern ecommerce applications. Traditional approaches require manually correlating data across separate systems for session recording, performance analysis, error tracking, and business intelligence, often leading to incomplete understanding of how technical issues impact business metrics.
 
-When a customer reports that "checkout doesn't work," separate monitoring tools require you to check session recording in one system, look up performance data in another platform, and search for related errors in a third tool. Sentry's integrated approach automatically links session replays with performance traces and error information, eliminating context switching and ensuring you never miss critical connections between user experience and technical issues.
+When a customer reports that "checkout doesn't work," separate monitoring tools force you to check user session replay software in one system, look up performance data in another platform, search for related errors in a third tool, and manually piece together the complete story. Sentry's integrated approach automatically links session replays with performance traces and error information, ensuring you see the complete technical and user experience context.
 
-The unified platform enables sophisticated analysis that wouldn't be possible with separate tools. You can identify patterns where specific performance issues consistently lead to user abandonment, or where certain error conditions correlate with increased support ticket volume. This helps you prioritize fixes based on actual business impact rather than just technical severity.
+The unified platform enables sophisticated analysis that separate tools cannot provide. You can identify patterns where specific performance bottlenecks consistently lead to user abandonment, correlate error conditions with support ticket volume, and prioritize fixes based on actual business impact rather than just technical severity. This holistic view helps you understand not just what broke, but how technical issues affect revenue and customer satisfaction.
 
-Start implementing session replay on your most critical user flows, then expand coverage based on the debugging value you discover. Focus on scenarios where traditional logging provides insufficient context about user experience problems, particularly during checkout processes and cart operations where user frustration directly impacts revenue. The sample rate for Sentry session replay can be optimized based on your specific needs, balancing comprehensive monitoring with data volume considerations.
+Performance optimization becomes data-driven when you can see exactly how checkout delays correlate with abandonment rates. The sample rate for Sentry session replay can be optimized based on your traffic volume and debugging needs, balancing comprehensive monitoring with data storage costs while ensuring critical business flows are always monitored.
 
-When users report problems with your ecommerce application, you'll immediately see exactly what they experienced and identify the technical root cause, leading to faster fixes and better customer experiences.
+Start implementing comprehensive monitoring on your most critical user flows, then expand coverage based on the debugging value you discover. Focus particularly on checkout processes, cart operations, and payment flows where technical issues directly impact revenue. When users report problems with your ecommerce application, you'll immediately see their complete experience and identify the technical root cause, leading to faster fixes and better customer experiences.
 
 ## Further Reading
 
