@@ -1,46 +1,50 @@
 # Using Sentry session replay to debug ecommerce performance issues
 
-When customers abandon their shopping carts or complain about checkout problems, traditional error logs leave you guessing about what actually happened. You might see a "payment timeout" error in your logs, but did the user wait patiently for 30 seconds, or did they rage-click the checkout button dozens of times before giving up? Understanding this difference is crucial for fixing the right problem.
+When customers abandon their shopping carts or complain about checkout problems, traditional error logs leave us guessing about what actually happened. We might see a "payment timeout" error in our logs, but did the user wait patiently for 30 seconds, or did they rage-click the checkout button dozens of times before giving up? Understanding this difference is crucial for fixing the right problem.
 
 Session replay technology transforms ecommerce debugging by showing exactly what users experienced during errors and performance issues. Unlike traditional analytics that show aggregate data, session replay captures and recreates individual user interactions, creating a video-like recording of what users see and do during critical moments like product searches, cart additions, and checkout processes.
 
-This guide demonstrates how to implement comprehensive monitoring in a Shopify environment using Sentry's unified platform, where session replay, performance data, and error information are automatically linked. We'll create realistic ecommerce failure scenarios and show you how to connect user frustration with technical root causes, eliminating the traditional gap between customer reports and technical debugging.
+This guide demonstrates how to implement comprehensive monitoring in a Shopify environment using Sentry's unified platform, where session replay, performance data, and error information are automatically linked. We'll create realistic ecommerce failure scenarios and show how to connect user frustration with technical root causes, eliminating the traditional gap between customer reports and technical debugging.
 
-## Setting up comprehensive monitoring in your Shopify environment
+## Setting up comprehensive monitoring in our Shopify environment
 
-We'll demonstrate Sentry's unified monitoring capabilities using a Shopify store with realistic ecommerce functionality. This setup process shows you how to integrate [session replay](https://sentry.io/product/session-replay/) with performance monitoring and error tracking while capturing the context needed for effective debugging.
+We'll demonstrate Sentry's unified monitoring capabilities using a Shopify store with realistic ecommerce functionality. This setup process shows how to integrate [session replay](https://sentry.io/product/session-replay/) with performance monitoring and error tracking while capturing the context needed for effective debugging.
 
-### Setting Up Sentry
+### Setting up Sentry
 
-To add Sentry monitoring to your Shopify store, follow these steps:
+To add Sentry monitoring to our Shopify store, follow these steps:
 
 1. Sign up for a [Sentry account](https://sentry.io).
 
 2. Create a new project by clicking **Create Project**.
 
-3. Choose **Browser JavaScript** as your platform, and give your project a name like "Shopify Store Monitoring". Click **Create Project** and then **Configure SDK** when prompted.
+3. Choose **Browser JavaScript** as the platform, and give the project a name like "Shopify Store Monitoring". Click **Create Project** and then **Configure SDK** when prompted.
 
 ![Create a Sentry JavaScript project through the UI](images/create-project.png)
 
-4. After creating the project, Sentry will provide you with a data source name (DSN), a unique identifier that tells the Sentry SDK where to send events from your Shopify store.
+4. After creating the project, Sentry will provide a data source name (DSN), a unique identifier that tells the Sentry SDK where to send events from our Shopify store.
 
 ![DSN for the Sentry project in the Sentry UI](images/dsn-value.png)
 
-We will use this DSN in the next section when integrating the Sentry SDK into the Shopify theme to enable session replay, performance monitoring, and error tracking for your ecommerce application.
+5. **Enable monitoring features** in the Sentry project settings. Navigate to **Settings** > **SDK Setup** > **Loader Script** and toggle on **Enable Performance Monitoring** and **Enable Session Replay**.
 
-### Setting Up Shopify
+![Sentry Loader Script configuration showing Performance Monitoring and Session Replay enabled](images/settings-session-replay.png)
+
+We will use this DSN in the next section when integrating the Sentry SDK into the Shopify theme to enable session replay, performance monitoring, and error tracking for our ecommerce application.
+
+### Setting up Shopify
 
 To demonstrate Sentry's session replay capabilities in a realistic ecommerce environment, we will set up a Shopify development store.
 
-1. **Create a Shopify Partner account** at [partners.shopify.com](https://partners.shopify.com) if you don't already have one. Partner accounts let you create unlimited development stores for testing without monthly fees.
+1. **Create a Shopify Partner account** at [partners.shopify.com](https://partners.shopify.com) if we don't already have one. Partner accounts let us create unlimited development stores for testing without monthly fees.
 
-2. **Create a new development store** by clicking "Stores" in your Partner dashboard, then "Add store". Choose "Development store" and select "Create a store to test and build" as your purpose.
+2. **Create a new development store** by clicking "Stores" in the Partner dashboard, then "Add store". Choose "Development store" and select "Create a store to test and build" as the purpose.
 
-3. **Create your store** after giving it a name, click **Create Development Store**.
+3. **Create the store** after giving it a name, click **Create Development Store**.
 
 ![Creating a new Shopify development store through the Partner dashboard](images/create-shopify-store.png)
 
-3. **Install your store theme.** Navigate to "Online Store" then "Themes" in your Shopify admin panel. Install the Horizon theme to follow along with this guide. Once you have added this theme, click **Publish**.
+3. **Install the store theme.** Navigate to "Online Store" then "Themes" in the Shopify admin panel. Install the Horizon theme to follow along with this guide. Once we have added this theme, click **Publish**.
 
 ![Installing the Horizon theme in Shopify store](images/install-horizon-theme.png)
 
@@ -50,11 +54,11 @@ To demonstrate Sentry's session replay capabilities in a realistic ecommerce env
 
 ![Adding sample products to Shopify development store](images/add-sample-products.png)
 
-### Integrate Sentry into your Shopify Theme
+### Integrate Sentry into our Shopify theme
 
-In your Shopify admin, navigate to "Online Store" then "Themes". Click the three dots on your active theme, then "Edit code". 
+In the Shopify admin, navigate to "Online Store" then "Themes". Click the three dots on the active theme, then "Edit code". 
 
-Open the `layout/theme.liquid` file and add the Sentry SDK to the `<head>` section, before `{{ content_for_header }}`.
+Open the `layout/theme.liquid` file and add the Sentry SDK to the `<head>` section, above `{{ content_for_header }}`.
 
 ```html
 <script
@@ -129,7 +133,7 @@ Open the `layout/theme.liquid` file and add the Sentry SDK to the `<head>` secti
 </script>
 ```
 
-Replace `YOUR_DSN_HERE` with your actual Sentry project DSN. This configuration sets up three essential monitoring capabilities for your ecommerce store:
+Replace `YOUR_DSN_HERE` with the actual Sentry project DSN. This configuration sets up three essential monitoring capabilities for our ecommerce store:
 
 **Session Replay**: The `replaysSessionSampleRate: 1.0` and `replaysOnErrorSampleRate: 1.0` settings capture 100% of user sessions so every error is accompanied by session replay data.
 
@@ -137,15 +141,21 @@ Replace `YOUR_DSN_HERE` with your actual Sentry project DSN. This configuration 
 
 **Ecommerce Context**: The `beforeSend` function automatically adds cart information, customer details, and page-specific data to every event.
 
-**User Feedback Widget**: The `feedbackIntegration` configuration creates a persistent feedback widget that appears as a floating button in your store. When users encounter problems during their shopping experience, they can click this widget to submit feedback, which automatically captures their current session replay along with screenshots of the exact moment they experienced the issue.
+**User Feedback Widget**: The `feedbackIntegration` configuration creates a persistent feedback widget that appears as a floating button in our store. When users encounter problems during their shopping experience, they can click this widget to submit feedback, which automatically captures their current session replay along with screenshots of the exact moment they experienced the issue.
 
-![Sentry user feedback widget appearing as a purple feedback button in the bottom-right corner of a Shopify store.](images/feedback-widget-setup.png)
+![Sentry user feedback widget appearing as a purple feedback button in the bottom-right corner of a Shopify store](images/feedback-widget-setup.png)
 
 ## Testing everything with the feedback widget
 
-Before implementing error scenarios, let's verify that our monitoring setup works correctly. Navigate to your Shopify store and interact with different pages. Add products to your cart, browse around, and notice the purple feedback widget in the bottom-right corner. Click the feedback widget to test the feedback submission process, then check your Sentry dashboard to confirm that session replays are being captured and user feedback is being recorded.
+Before implementing error scenarios, let's verify that our monitoring setup works correctly. Navigate to the Shopify store and interact with different pages. Add products to the cart, browse around, and notice the purple feedback widget in the bottom-right corner. 
 
-The feedback widget serves as your direct connection to customer experience issues. When users encounter problems during their shopping journey, they can immediately report issues while the context is fresh, and Sentry automatically associates their feedback with the technical data needed for debugging.
+![User feedback widget visible on Shopify checkout page](images/checkout-feedback-widget.png)
+
+Click the feedback widget to test the feedback submission process, then check the Sentry dashboard to confirm that session replays are being captured and user feedback is being recorded.
+
+![User feedback submissions displayed in the Sentry dashboard interface](images/feedback-in-sentry-ui.png)
+
+The feedback widget serves as our direct connection to customer experience issues. When users encounter problems during their shopping journey, they can immediately report issues while the context is fresh, and Sentry automatically associates their feedback with the technical data needed for debugging.
 
 ## Setting up the complex checkout flow scenario
 
@@ -153,9 +163,9 @@ Now we'll create a comprehensive checkout flow that demonstrates how session rep
 
 Modern ecommerce checkout flows involve multiple services working together: inventory validation, tax calculation, shipping rates, discount application, payment processing, and order creation. When any of these steps fails or performs slowly, users experience checkout abandonment without understanding why. Our implementation creates a realistic scenario where multiple services can fail independently, helping demonstrate how Sentry's unified monitoring reveals the complete picture.
 
-### Step 1: Modify the Existing Button Structure
+### Step 1: Modify the existing button structure
 
-In your Shopify admin, navigate to "Online Store" then "Themes", click the three dots on your active theme, then "Edit code". Open `snippets/cart-summary.liquid` and find this existing button:
+In the Shopify admin, navigate to "Online Store" then "Themes", click the three dots on the active theme, then "Edit code". Open `snippets/cart-summary.liquid` and find this existing button in the `div` with the class `cart__ctas`:
 
 ```html
 <button
@@ -190,7 +200,7 @@ Replace it with:
 </button>
 ```
 
-### Step 2: Add Comprehensive Checkout Flow After the Existing Stylesheet
+### Step 2: Add comprehensive checkout flow after the existing stylesheet
 
 The file has a `{% stylesheet %}` section at the bottom. Add this JavaScript section right **after** the closing `{% endstylesheet %}` tag:
 
@@ -604,33 +614,27 @@ function handleCheckoutError(error, button, buttonText, spinner) {
 </script>
 ```
 
-This comprehensive implementation demonstrates realistic ecommerce challenges by creating a multi-step checkout process where each stage can fail independently. The code uses Sentry's performance monitoring capabilities with nested spans to track each operation's timing and success rate.
+This code demonstrates realistic ecommerce challenges by creating a multi-step checkout process where each stage can fail independently. The code uses Sentry's performance monitoring with nested spans to track each operation's timing and success rate.
 
-**Key features of this implementation:**
+Performance issues cascade through dependent operations, while session replay captures the user experience during these delays and failures.
 
-- **Sequential Dependencies**: Cart validation must complete before tax calculation, mirroring real checkout flows
-- **Parallel Operations**: Shipping and discount calculations run simultaneously for efficiency
-- **Performance Bottlenecks**: Shipping calculation intentionally takes 1.2+ seconds, simulating slow third-party APIs
-- **Multiple Failure Points**: Each step has realistic failure rates (inventory 10%, shipping 15%, payment 5%)
-- **Detailed Instrumentation**: Every operation is wrapped in Sentry spans with relevant attributes and timing data
+## Testing the checkout flow with mobile device feedback
 
-The checkout flow spans demonstrate how performance issues cascade through dependent operations, while session replay captures the user experience during these delays and failures.
+Add several products to the cart to create a realistic checkout scenario, then navigate to the `/cart` page on both desktop and mobile devices. Click the **Checkout** button to trigger the complex checkout process. The loading state persists longer than typical ecommerce flows, especially during the shipping calculation phase which acts as the primary bottleneck.
 
-## Testing the complex checkout flow with mobile device feedback
-
-Add several products to your cart to create a realistic checkout scenario, then navigate to the `/cart` page on both desktop and mobile devices. Click the **Checkout** button to trigger the complex checkout process. You'll notice the loading state persists longer than typical ecommerce flows, especially during the shipping calculation phase which acts as the primary bottleneck.
-
-The checkout process may succeed after several seconds, or it may fail at any step with specific error messages like "Shipping Error" or "Payment Declined". Each failure represents a different technical issue that would require different debugging approaches in production.
+The checkout process may succeed after several seconds, or it may fail at any step with specific error messages like **Shipping Error** or **Payment Declined**. Each failure represents a different technical issue that would require different debugging approaches in production.
 
 ![Screenshot of Shopify cart page on mobile showing the checkout button with loading spinner during the complex multi-step checkout process](images/mobile-checkout-complex.png)
 
-Test the checkout flow multiple times to experience different failure scenarios. The randomized failure rates mean you'll encounter various error conditions, each providing different performance traces and error context in Sentry. While experiencing checkout failures on your mobile device, click the purple feedback widget to submit reports about the specific issues you encounter.
+Test the checkout flow multiple times to trigger different failure scenarios. This triggers various error conditions, each providing different performance traces and error context in Sentry. 
 
-When submitting feedback through the mobile widget, describe the problems as a real user would: "Checkout took forever to load and then failed with shipping error" or "Payment was declined even though my card works fine." This realistic feedback helps demonstrate how user reports connect directly with the detailed performance data and error traces captured by Sentry.
+While experiencing checkout failures on mobile devices, click the purple feedback widget to submit reports about the specific issues encountered.
+
+![Mobile device feedback widget interface for reporting checkout issues](images/feedback-mobile.png)
 
 ## Viewing user feedback in Sentry
 
-Navigate to your Sentry project dashboard and click "User Feedback" in the sidebar. You'll see the feedback submissions you created, each describing different aspects of the checkout experience problems. The feedback entries now connect to much more sophisticated technical data than simple API timeouts.
+Navigate to the Sentry project dashboard and click "Issues" then "User Feedback" in the sidebar. The feedback submissions created connect to much more sophisticated technical data than simple API timeouts.
 
 ![Screenshot of Sentry User Feedback dashboard showing the complex checkout error reports with user descriptions and associated technical performance data](images/user-feedback-complex-dashboard.png)
 
@@ -640,53 +644,65 @@ Each feedback entry links to comprehensive performance traces showing exactly wh
 
 Click on any feedback entry to see the complete context that Sentry automatically captured for the complex checkout flow. The feedback detail view now connects multiple layers of technical information that would traditionally require separate tools and manual correlation.
 
-### Mobile Session Replay with Multi-Step Process
+### Session replay
 
-The session replay shows the complete user journey through the extended checkout process. You can watch users interact with the cart, click checkout, observe the prolonged loading state, and see their reaction to different failure scenarios. Mobile session replay captures the frustration that builds during the shipping calculation delay, particularly noticeable when users expect immediate responses.
+The session replay shows the complete user journey through the extended checkout process. We can watch users interact with the cart, click checkout multiple times, and encounter various error scenarios. Session replay captures the sequence of user actions and system failures that occur during complex checkout flows.
 
-![Screenshot of Sentry mobile session replay showing the complete multi-step checkout sequence with extended loading states and various failure points](images/mobile-session-replay-complex.png)
+![Screenshot of Sentry session replay showing the complete checkout sequence with multiple user interactions and various error conditions](images/session-replay-complex.png)
 
-The replay reveals user behavior patterns during extended loading periods. Mobile users often switch between apps or scroll around the page while waiting, and session replay captures these context switches that indicate growing impatience with checkout performance.
+The replay reveals user behavior patterns during checkout failures. Users often retry checkout actions multiple times when errors occur, and session replay captures these repeated interactions along with the specific error conditions that caused each failure, providing clear insight into where the checkout process breaks down.
 
-### Comprehensive Performance Traces
+### Performance traces
 
-The performance trace now shows a waterfall of all checkout operations with nested span relationships. You can see how cart validation leads to tax calculation, how shipping and discount operations run in parallel, and where the process bottlenecks or fails completely.
+The performance trace now shows a waterfall of all checkout operations with nested span relationships. We can see how cart validation leads to tax calculation, how shipping and discount operations run in parallel, and where the process bottlenecks or fails completely.
 
 ![Screenshot of Sentry performance trace showing the complete checkout flow waterfall with nested spans for validation, tax calculation, shipping, discounts, payment, and order creation](images/performance-trace-complex.png)
 
 Performance traces reveal the cascade effect of slow operations. When shipping calculation takes 2+ seconds, the entire checkout experience feels sluggish even if other operations complete quickly. The trace shows exactly which operations consume the most time and how parallel processing helps mitigate some delays.
 
-### Detailed Error Context with Business Impact
+### Detailed error context with business impact
 
 Error details now include rich context about which step failed, what the cart contents were, how long the process had been running, and what the business impact represents. Each error includes the complete checkout state, making it possible to reproduce issues or understand why specific combinations of cart contents trigger failures.
 
 ![Screenshot of Sentry error details showing complex checkout failure with complete context including cart data, processing time, failed step, and business impact assessment](images/error-details-complex.png)
 
-Error context transforms generic failure messages into actionable debugging information. Instead of knowing that "checkout failed," you have specific details about cart value, processing time, which integration failed, and how many customers might be affected by similar issues.
+Error context transforms generic failure messages into actionable debugging information. Instead of knowing that "checkout failed," we have specific details about cart value, processing time, which integration failed, and how many customers might be affected by similar issues.
 
-### Network Requests and Third-Party Integration Monitoring
+### Network requests and third-party integration monitoring
 
-The network tab shows all API calls made during the checkout process, including the intentional tax service call that demonstrates how to monitor third-party integrations. You can see request timing, headers, payloads, and responses for each step in the checkout flow.
+The network tab shows all API calls made during the checkout process, including the intentional tax service call that demonstrates how to monitor third-party integrations. We can see request timing, headers, payloads, and responses for each step in the checkout flow.
 
 ![Screenshot of Sentry network monitoring showing API calls during checkout including tax service, shipping providers, and payment gateway requests with timing and response data](images/network-requests-complex.png)
 
 Network monitoring reveals how third-party service performance affects user experience. Slow shipping provider APIs or unreliable tax calculation services directly impact checkout completion rates, and Sentry's integration shows exactly where these dependencies create user experience problems.
 
+### AI-powered root cause analysis with Sentry Seer
+
+When debugging complex ecommerce flows with multiple integration points, understanding how seemingly unrelated errors connect can be challenging. Sentry's AI assistant, [Seer](https://sentry.io/product/seer/), automatically analyzes error patterns and suggests potential relationships between failures across our checkout process.
+
+![Screenshot of Sentry Issues interface showing Seer's root cause analysis panel with intelligent suggestions for complex checkout failures](images/seer-root-cause-panel.png)
+
+In this example, Seer identifies that the 404 tax service error may have cascaded to cause the inventory availability flag to be incorrectly set. Rather than treating these as separate issues, Seer recognizes the potential connection and provides an initial hypothesis for investigation.
+
+![Screenshot of Sentry Seer AI providing analysis of checkout issues, connecting tax service failures to inventory problems with actionable insights](images/seer-analysis-complex.png)
+
+Seer's analysis transforms complex multi-step failures into actionable debugging paths. Instead of manually correlating the tax service timeout with the subsequent inventory error, the AI immediately suggests that the failed tax calculation may have disrupted the checkout state management, leading to incorrect inventory flags. This accelerates debugging by pointing developers toward the actual root cause rather than just the most visible symptom.
+
 ## The complete debugging picture
 
 The complex checkout flow scenario demonstrates why unified monitoring becomes essential for modern ecommerce applications. Traditional approaches require manually correlating data across separate systems for session recording, performance analysis, error tracking, and business intelligence, often leading to incomplete understanding of how technical issues impact business metrics.
 
-When a customer reports that "checkout doesn't work," separate monitoring tools force you to check user session replay software in one system, look up performance data in another platform, search for related errors in a third tool, and manually piece together the complete story. Sentry's integrated approach automatically links session replays with performance traces and error information, ensuring you see the complete technical and user experience context.
+When a customer reports that **checkout doesn't work,** separate monitoring tools force us to check user session replay software in one system, look up performance data in another platform, search for related errors in a third tool, and manually piece together the complete story. Sentry's integrated approach automatically links session replays with performance traces and error information, ensuring we see the complete technical and user experience context.
 
-The unified platform enables sophisticated analysis that separate tools cannot provide. You can identify patterns where specific performance bottlenecks consistently lead to user abandonment, correlate error conditions with support ticket volume, and prioritize fixes based on actual business impact rather than just technical severity. This holistic view helps you understand not just what broke, but how technical issues affect revenue and customer satisfaction.
+The unified platform enables sophisticated analysis that separate tools cannot provide. We can identify patterns where specific performance bottlenecks consistently lead to user abandonment, correlate error conditions with support ticket volume, and prioritize fixes based on actual business impact rather than just technical severity. This holistic view helps us understand not just what broke, but how technical issues affect revenue and customer satisfaction.
 
-Performance optimization becomes data-driven when you can see exactly how checkout delays correlate with abandonment rates. The sample rate for Sentry session replay can be optimized based on your traffic volume and debugging needs, balancing comprehensive monitoring with data storage costs while ensuring critical business flows are always monitored.
+Performance optimization becomes data-driven when we can see exactly how checkout delays correlate with abandonment rates. The sample rate for Sentry session replay can be optimized based on traffic volume and debugging needs, balancing comprehensive monitoring with data storage costs while ensuring critical business flows are always monitored.
 
-Start implementing comprehensive monitoring on your most critical user flows, then expand coverage based on the debugging value you discover. Focus particularly on checkout processes, cart operations, and payment flows where technical issues directly impact revenue. When users report problems with your ecommerce application, you'll immediately see their complete experience and identify the technical root cause, leading to faster fixes and better customer experiences.
+Start implementing comprehensive monitoring on the most critical user flows, then expand coverage based on the debugging value discovered. Focus particularly on checkout processes, cart operations, and payment flows where technical issues directly impact revenue. When users report problems with ecommerce applications, we'll immediately see their complete experience and identify the technical root cause, leading to faster fixes and better customer experiences.
 
-## Further Reading
+## Further reading
 
-To learn more about implementing session replay in your ecommerce environment, explore these resources:
+To learn more about implementing session replay tools in ecommerce environments, explore these resources:
 
 - [Session Replay Product Overview](https://sentry.io/product/session-replay/) - Complete guide to Sentry's session replay capabilities
 - [Session Replay Documentation](https://docs.sentry.io/product/explore/session-replay/) - Technical documentation and configuration options
