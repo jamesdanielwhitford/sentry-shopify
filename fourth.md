@@ -2,13 +2,9 @@
 
 When customers abandon their shopping carts or complain about checkout problems, traditional error logs leave you guessing about what actually happened. You might see a "payment timeout" error in your logs, but did the user wait patiently for 30 seconds, or did they rage-click the checkout button dozens of times before giving up? Understanding this difference is crucial for fixing the right problem.
 
-This is where session replay technology transforms ecommerce debugging. Session replay gives you the "what" and "when" by showing exactly what users experienced during errors and performance issues. Performance monitoring provides the "how slow" and "where in the code" with precise timing data and traces. Error tracking delivers the "why it broke" with complete stack traces and breadcrumbs. When these capabilities work together in a unified platform like Sentry, you get complete context about ecommerce issues without jumping between different replay and monitoring solutions to piece everything together.
+Session replay technology transforms ecommerce debugging by showing exactly what users experienced during errors and performance issues. Unlike traditional analytics that show aggregate data, session replay captures and recreates individual user interactions, creating a video-like recording of what users see and do during critical moments like product searches, cart additions, and checkout processes.
 
-Traditional debugging approaches force you to correlate data across multiple tools. You might use one tool for website session recording, another for performance monitoring, and a third for error tracking. Sentry's integrated approach means user session replay, performance data, and error information are automatically linked, giving you the full story when users encounter problems during their shopping experience.
-
-Session replay captures and recreates user interactions on your website, creating a video-like recording of exactly what users see and do. In ecommerce applications, this technology helps you understand user behavior during critical moments like product searches, cart additions, and checkout processes. Unlike traditional analytics that show aggregate data about user actions, browser session replay software lets you watch individual user journeys that led to specific problems.
-
-The advantages of replay become clear when combined with performance monitoring and error tracking. A slow API call might show up in your performance metrics, but session replay shows you how users react to that slowness. Modern rum session replay tools also respect user privacy by automatically masking sensitive information like payment details and personal data.
+This guide demonstrates how to implement comprehensive monitoring in a Shopify environment using Sentry's unified platform, where session replay, performance data, and error information are automatically linked. We'll create realistic ecommerce failure scenarios and show you how to connect user frustration with technical root causes, eliminating the traditional gap between customer reports and technical debugging.
 
 ## Setting up comprehensive monitoring in your Shopify environment
 
@@ -145,314 +141,236 @@ Replace `YOUR_DSN_HERE` with your actual Sentry project DSN. This configuration 
 
 ![Sentry user feedback widget appearing as a purple feedback button in the bottom-right corner of a Shopify store.](images/feedback-widget-setup.png)
 
-## Identifying user frustration patterns during checkout failures
+## Testing everything with the feedback widget
 
-Now we will demonstrate how Session Replay reveals user behavior patterns, then connect those insights to error tracking and user feedback to show how Sentry's unified platform works together.
+Before implementing error scenarios, let's verify that our monitoring setup works correctly. Navigate to your Shopify store and interact with different pages. Add products to your cart, browse around, and notice the purple feedback widget in the bottom-right corner. Click the feedback widget to test the feedback submission process, then check your Sentry dashboard to confirm that session replays are being captured and user feedback is being recorded.
 
-Open the `snippets/cart-summary.liquid` file and find the existing checkout button:
+The feedback widget serves as your direct connection to customer experience issues. When users encounter problems during their shopping journey, they can immediately report issues while the context is fresh, and Sentry automatically associates their feedback with the technical data needed for debugging.
+
+## Setting up the checkout error scenario
+
+Now we'll create a realistic checkout failure that demonstrates how session replay connects user frustration with technical root causes. This scenario simulates a shipping rates API that takes too long to respond and then fails completely, creating the kind of checkout abandonment issues that directly impact ecommerce revenue.
+
+We need to properly modify the existing `snippets/cart-summary.liquid` file without breaking its Liquid template structure. The key is to enhance the existing checkout button and add our error simulation logic after the existing stylesheet section.
+
+### Step 1: Modify the Existing Button Structure
+
+In your Shopify admin, navigate to "Online Store" then "Themes", click the three dots on your active theme, then "Edit code". Open `snippets/cart-summary.liquid` and find this existing button:
 
 ```html
-<div class="cart__ctas">
-  <button
-    type="submit"
-    id="checkout"
-    class="cart__checkout-button button"
-    name="checkout"
-    {% if cart == empty %}
-      disabled
-    {% endif %}
-    form="cart-form"
-  >
-    {{ 'content.checkout' | t }}
-  </button>
-
-  {% if additional_checkout_buttons and settings.show_accelerated_checkout_buttons %}
-    <div class="additional-checkout-buttons additional-checkout-buttons--vertical">
-      {{ content_for_additional_checkout_buttons }}
-    </div>
+<button
+  type="submit"
+  id="checkout"
+  class="cart__checkout-button button"
+  name="checkout"
+  {% if cart == empty %}
+    disabled
   {% endif %}
-</div>
+  form="cart-form"
+>
+  {{ 'content.checkout' | t }}
+</button>
 ```
 
- Replace it with this:
+Replace it with:
 
 ```html
-<div class="cartctas">
-  <button
-    type="submit"
-    id="checkout"
-    class="cartcheckout-button button"
-    name="checkout"
-    {% if cart == empty %}
-      disabled
-    {% endif %}
-    form="cart-form"
-  >
-    <span id="checkout-button-text">{{ 'content.checkout' | t }}</span>
-    <span id="checkout-spinner" class="loading__spinner" style="display: none;"></span>
-  </button>
-  {% if additional_checkout_buttons and settings.show_accelerated_checkout_buttons %}
-    <div class="additional-checkout-buttons additional-checkout-buttons--vertical">
-      {{ content_for_additional_checkout_buttons }}
-    </div>
+<button
+  type="submit"
+  id="checkout"
+  class="cart__checkout-button button"
+  name="checkout"
+  {% if cart == empty %}
+    disabled
   {% endif %}
-</div>
+  form="cart-form"
+>
+  <span id="checkout-button-text">{{ 'content.checkout' | t }}</span>
+  <span id="checkout-spinner" style="display: none;">⏳</span>
+</button>
+```
+
+### Step 2: Add JavaScript After the Existing Stylesheet
+
+Tha file has a `{% stylesheet %}` section at the bottom. Add this JavaScript section right **after** the closing `{% endstylesheet %}` tag:
+
+```html
 <script>
 document.addEventListener('DOMContentLoaded', function() {
   const checkoutBtn = document.getElementById('checkout');
-  if (checkoutBtn) {
+  if (checkoutBtn && checkoutBtn.form && checkoutBtn.form.id === 'cart-form') {
     checkoutBtn.addEventListener('click', function(e) {
+      // Only intercept if cart has items
+      if ({{ cart.item_count }} === 0) return;
+      
       e.preventDefault();
       
       const buttonText = document.getElementById('checkout-button-text');
       const spinner = document.getElementById('checkout-spinner');
       
+      if (!buttonText || !spinner) return;
+      
+      // Show loading state
       checkoutBtn.disabled = true;
       buttonText.style.display = 'none';
       spinner.style.display = 'inline-block';
-      buttonText.textContent = 'Calculating shipping...';
       
-      const startTime = performance.now();
-      
-      fetch('https://httpbin.org/delay/12')
-      .then(response => {
-        const duration = performance.now() - startTime;
-        console.log(`Request completed in ${Math.round(duration)}ms`);
-        
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        return response.json();
-      })
-      .then(data => {
-        console.log('Delay service response:', data);
-        throw new Error('Shipping rates API timeout after 12 seconds');
-      })
+      // Simulate realistic shipping calculation that times out
+      calculateShippingForCheckout()
+        .then(() => {
+          // Success - proceed to actual checkout
+          window.location.href = '{{ routes.cart_url }}/checkout';
+        })
+        .catch(error => {
+          // Handle shipping calculation failure
+          handleShippingError(error, checkoutBtn, buttonText, spinner);
+        });
     });
   }
 });
+
+async function calculateShippingForCheckout() {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  
+  try {
+    const response = await fetch('{{ routes.cart_url }}/shipping_rates.json', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      body: JSON.stringify({
+        shipping_address: {
+          country: 'US',
+          province: 'CA',
+          zip: '90210'
+        }
+      }),
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      throw new Error(`Shipping service unavailable (HTTP ${response.status})`);
+    }
+    
+    return await response.json();
+  } catch (error) {
+    clearTimeout(timeoutId);
+    
+    if (error.name === 'AbortError') {
+      throw new Error('Shipping calculation timed out after 8 seconds');
+    }
+    throw error;
+  }
+}
+
+function handleShippingError(error, button, buttonText, spinner) {
+  // Capture error for monitoring (this is a critical checkout flow)
+  if (typeof Sentry !== 'undefined') {
+    Sentry.captureException(error, {
+      tags: {
+        operation: 'checkout_flow',
+        step: 'shipping_calculation'
+      },
+      extra: {
+        cart_total: '{{ cart.total_price | money_without_currency }}',
+        cart_currency: '{{ cart.currency.iso_code }}',
+        item_count: {{ cart.item_count }},
+        shipping_country: 'US'
+      }
+    });
+  }
+  
+  // Reset button to error state
+  button.disabled = false;
+  spinner.style.display = 'none';
+  buttonText.style.display = 'inline-block';
+  buttonText.textContent = 'Try Again - Shipping Error';
+  button.style.backgroundColor = '#dc3545';
+  button.style.color = 'white';
+  
+  // Reset button after 3 seconds
+  setTimeout(() => {
+    buttonText.textContent = '{{ 'content.checkout' | t }}';
+    button.style.backgroundColor = '';
+    button.style.color = '';
+  }, 3000);
+}
 </script>
 ```
 
-This will make an intentionally slow API call when the user clicks the checkout button on the `/cart` page. 
+This implementation creates a realistic shipping calculation failure that demonstrates how technical problems manifest as user experience issues. The API call attempts to calculate shipping rates but fails either due to timeout or server error, leaving users frustrated and unable to complete their purchase.
 
-Add some products to your cart and navigate to the `/cart` page. Click the **Checkout** button to trigger the error.
+The code follows production patterns by using Shopify's actual routing system with `{{ routes.cart_url }}`, including real cart data in error reports using Liquid template variables, and manually capturing the handled error with `Sentry.captureException()` since this represents a critical business flow that needs monitoring even when gracefully handled.
 
-![Screenshot of Shopify cart page showing the checkout button with the failed request error shown](images/checkout-failed.png)
+## Testing the error with mobile device feedback
 
-### Viewing Session Replay Data
+Add some products to your cart and navigate to the `/cart` page on both desktop and mobile devices. Click the **Checkout** button to trigger the shipping calculation error. On mobile devices, the extended loading time and eventual failure feel particularly frustrating because users expect mobile interactions to be immediate and seamless.
 
-Now navigate to the Sentry project dashboard and click "Replays" in the sidebar. You'll see your recorded session listed with key metrics like duration and error count. Click on the replay entry to open the session replay player.
+![Screenshot of Shopify cart page on mobile showing the checkout button with loading spinner during the failed shipping calculation](images/mobile-checkout-failed.png)
 
-![Screenshot of Sentry Replays dashboard showing a list of recorded sessions with columns for replay ID, duration, errors, and user activity metrics](images/sentry-replays-dashboard.png)
+While experiencing this checkout failure on your mobile device, click the purple feedback widget to submit a report about the problem. The mobile experience makes user frustration more pronounced, and the feedback widget provides an immediate outlet for users to report checkout issues while they're actively experiencing them.
 
-The replays dashboard shows your checkout session with indicators for errors and significant user activity. The replay duration captures the entire user interaction from cart viewing through the failed checkout attempt.
+When submitting feedback through the mobile widget, describe the checkout problem as a real user would: "Checkout button got stuck calculating shipping and then showed an error. Very frustrating when trying to buy something quickly." This realistic feedback helps demonstrate how user reports connect directly with technical debugging data.
 
-The main panel displays the visual reproduction of what the user saw, while the timeline below shows user interactions, network requests, and performance events synchronized together.
+## Viewing user feedback in Sentry
 
-### Connecting Session Replay to Error Tracking
+Navigate to your Sentry project dashboard and click "User Feedback" in the sidebar. You'll see the feedback submission you just created, complete with the user's description of the checkout problem and their contact information if provided.
 
-You can also see your replays from inside an issue. Navigate to "Issues" in Sentry to see the captured error information, traces, and session replay.
+![Screenshot of Sentry User Feedback dashboard showing the checkout error report with user description and associated technical data](images/user-feedback-dashboard.png)
 
-![Sentry Issues page showing the shipping timeout error with linked session replay, user context, and cart information](images/checkout-error-details.png)
+The feedback entry shows not just the user's description of the problem, but also links directly to the associated session replay and error data. This connection eliminates the traditional gap between customer support reports and technical investigation. Instead of support teams describing problems to engineering teams, you have direct access to both the user's experience and the technical root cause.
 
-Instead of manually correlating an error log entry with user behavior data from a separate tool, you can immediately jump from the error details to watching exactly how the user experienced the problem. The error includes ecommerce-specific context like cart value and items, helping you understand the business impact.
+## Connecting feedback to session replay and technical data
 
-### Capturing User Feedback During Checkout Issues
+Click on the feedback entry to see the complete context that Sentry automatically captured. The feedback detail view connects four critical pieces of information that traditionally require separate tools to correlate.
 
-When users encounter this checkout problem, the feedback widget provides an easy way for them to report the issue directly. Since the widget automatically includes session replay data and performance context, user reports come with the complete technical information needed for debugging, eliminating the typical disconnect between user complaints and technical investigation.
+### Mobile Session Replay
 
-![Screenshot of Sentry user feedback widget appearing over the checkout interface, with a feedback form asking users about their checkout experience](images/checkout-feedback-widget.png)
+The session replay shows exactly how the checkout failure appeared on the user's mobile device. You can watch the user add items to their cart, navigate to checkout, click the button, wait through the loading state, and see the eventual error message. Mobile session replay captures touch interactions, scroll behavior, and the specific timing of user actions that led to frustration.
 
-The user feedback widget remains accessible in the corner of the screen during checkout delays, allowing users to report their experience while it's happening. The feedback is automatically associated with the current session replay and error data, giving you complete context about the reported problem without requiring additional investigation.
+![Screenshot of Sentry mobile session replay showing the complete checkout sequence from cart interaction through the shipping calculation failure](images/mobile-session-replay-checkout.png)
 
-This means when a customer reports an issue, you immediately have:
-- **Visual evidence** of their exact experience through session replay
-- **Technical details** about the specific error that occurred
-- **User context** including their feedback about the problem
-- **Business impact** data like cart value and customer information
+Mobile session replay reveals behavior patterns unique to mobile users. Desktop users might wait patiently during loading states, but mobile users often expect immediate responses and quickly abandon slow processes. The replay shows precisely when users become frustrated and how they react to checkout delays.
 
-## Pinpointing performance bottlenecks with distributed tracing
+### Network Request Details
 
-Database performance issues create some of the most frustrating ecommerce experiences because they make interfaces feel completely broken to users. This scenario demonstrates how Sentry's unified monitoring platform connects slow database operations with their actual impact on user behavior, helping you prioritize performance optimizations based on real user experience data rather than just technical metrics.
+The network tab within the session replay shows the complete shipping rates API call, including request headers, payload, timing information, and the eventual failure response. You can see exactly how long the API took to respond and what error was returned.
 
-Open the `assets/cart.js` file and find the `updateQuantity` method. Replace it with this enhanced version that simulates slow database operations:
+![Screenshot of Sentry network details showing the shipping rates API request timing, headers, and failure response with HTTP status code](images/network-request-details.png)
 
-```javascript
-updateQuantity(line, quantity, event, name, variantId) {
-  this.enableLoading(line);
+Network details reveal whether checkout failures stem from slow API responses, server errors, or client-side timeouts. In this case, the shipping rates API either times out after 8 seconds or returns an HTTP error status, providing clear technical context for the user experience problem captured in the session replay.
 
-  const body = JSON.stringify({
-    line,
-    quantity,
-    sections: this.getSectionsToRender().map((section) => section.section),
-    sections_url: window.location.pathname,
-  });
+### Performance Trace
 
-  this.showProgressDialog('Updating cart...');
+The performance trace shows the complete transaction timeline from user interaction through API failure. Timing data reveals that shipping calculation requests should complete in under 2 seconds, but this particular request either times out or fails completely, creating an unacceptable user experience.
 
-  // Simulate slow database operation using httpbin delay
-  const startTime = performance.now();
-  
-  fetch('https://httpbin.org/delay/12')
-    .then(() => {
-      // After the delay, make the actual cart update
-      return fetch(`${routes.cart_change_url}`, { ...fetchConfig(), ...{ body } });
-    })
-    .then((response) => {
-      const duration = performance.now() - startTime;
-      
-      if (typeof Sentry !== 'undefined') {
-        Sentry.addBreadcrumb({
-          message: 'Slow cart update detected',
-          level: 'warning',
-          data: {
-            duration: `${Math.round(duration)}ms`,
-            expected_duration: '< 1000ms'
-          }
-        });
-        
-        if (duration > 10000) {
-          Sentry.captureException(new Error(`Cart update took ${Math.round(duration)}ms - slow database query`));
-        }
-      }
-      
-      this.hideProgressDialog();
-      return response.text();
-    })
-    .then((state) => {
-      const parsedState = JSON.parse(state);
-      this.classList.toggle('is-empty', parsedState.item_count === 0);
-      const cartDrawerWrapper = document.querySelector('cart-drawer');
-      const cartFooter = document.getElementById('main-cart-footer');
+![Screenshot of Sentry performance trace showing the checkout transaction timeline with slow shipping calculation API highlighted](images/performance-trace-checkout.png)
 
-      if (cartFooter) cartFooter.classList.toggle('is-empty', parsedState.item_count === 0);
-      if (cartDrawerWrapper) cartDrawerWrapper.classList.toggle('is-empty', parsedState.item_count === 0);
-      
-      this.getSectionsToRender().forEach((section) => {
-        const elementToReplace =
-          document.getElementById(section.id).querySelector(section.selector) || document.getElementById(section.id);
-        elementToReplace.innerHTML = this.getSectionInnerHTML(parsedState.sections[section.section], section.selector);
-      });
-      
-      this.updateLiveRegions(line, parsedState.item_count);
-      const lineItem = document.getElementById(`CartItem-${line}`) || document.getElementById(`CartDrawer-Item-${line}`);
-      if (lineItem && lineItem.querySelector(`[name="${name}"]`)) {
-        cartDrawerWrapper ? this.disableLoading(line) : lineItem.querySelector(`[name="${name}"]`).focus();
-      } else if (parsedState.item_count === 0 && cartDrawerWrapper) {
-        this.disableLoading(line);
-      }
-      if (!cartDrawerWrapper) {
-        this.disableLoading(line);
-      }
-    })
-    .catch(() => {
-      this.querySelectorAll('.loading__spinner').forEach((overlay) => overlay.classList.add('hidden'));
-      const errors = document.getElementById('cart-errors') || document.getElementById('CartDrawer-CartErrors');
-      errors.textContent = window.cartStrings.error;
-      this.hideProgressDialog();
-    });
-},
+Performance tracing connects user actions with backend operations, showing how API slowness cascades into user experience problems. The trace reveals not just that the shipping calculation failed, but how that failure fits into the broader context of checkout performance.
 
-showProgressDialog(message) {
-  let dialog = document.getElementById('cart-progress-dialog');
-  if (!dialog) {
-    dialog = document.createElement('div');
-    dialog.id = 'cart-progress-dialog';
-    dialog.style.cssText = `
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      background: white;
-      padding: 2rem;
-      border-radius: 8px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-      z-index: 10000;
-      text-align: center;
-    `;
-    document.body.appendChild(dialog);
-  }
-  
-  dialog.innerHTML = `
-    <div class="loading__spinner"></div>
-    <p style="margin-top: 1rem;">${message}</p>
-  `;
-  dialog.style.display = 'block';
-},
+### Error Context and Stack Trace
 
-hideProgressDialog() {
-  const dialog = document.getElementById('cart-progress-dialog');
-  if (dialog) {
-    dialog.style.display = 'none';
-  }
-}
-```
+The error details show the exact JavaScript exception captured when the shipping calculation fails, complete with stack trace information and the custom context added during error capture. Error context includes cart information, shipping address, and API endpoint details that help with debugging.
 
-This implementation shows a progress dialog during cart updates and introduces a 12-second delay to simulate database performance problems. Navigate to your cart page and try changing the quantity of any item using the plus or minus buttons.
+![Screenshot of Sentry error details showing the shipping calculation timeout error with full stack trace and ecommerce context](images/error-details-context.png)
 
-### Understanding Performance Impact Through Session Replay
+Error context transforms generic timeout messages into actionable debugging information. Instead of just knowing that "something failed during checkout," you have specific details about cart contents, shipping calculations, and API endpoints that enable targeted fixes.
 
-When you view this scenario in Sentry's session replay player, the complete user journey becomes clear. The replay shows the user clicking to update cart quantities, the progress dialog appearing, then the extended wait time before completion.
+## The complete debugging picture
 
-![Screenshot of Sentry session replay player showing the complete cart update sequence with timeline markers indicating the quantity change, progress dialog, and extended wait time](images/cart-performance-replay-timeline.png)
+The checkout failure scenario demonstrated why session replay technology becomes exponentially more valuable when integrated with performance monitoring and error tracking in a unified platform. Traditional approaches force you to manually correlate data across different systems for user session replay software, performance analysis, and error investigation, often leading to incomplete understanding of user experience problems.
 
-The session replay timeline reveals how users react to performance bottlenecks differently than error failures. While users might retry failed operations, slow operations often lead to abandonment as users assume the interface is broken. This behavioral insight helps prioritize which performance issues have the greatest business impact.
+When a customer reports that "checkout doesn't work," separate monitoring tools require you to check session recording in one system, look up performance data in another platform, and search for related errors in a third tool. Sentry's integrated approach automatically links session replays with performance traces and error information, eliminating context switching and ensuring you never miss critical connections between user experience and technical issues.
 
-### Performance Monitoring for Database Bottlenecks
+The unified platform enables sophisticated analysis that wouldn't be possible with separate tools. You can identify patterns where specific performance issues consistently lead to user abandonment, or where certain error conditions correlate with increased support ticket volume. This helps you prioritize fixes based on actual business impact rather than just technical severity.
 
-Performance monitoring for this scenario shows the slow database operation in the network trace, with timing information that helps developers understand the technical aspects of the performance problem.
+Start implementing session replay on your most critical user flows, then expand coverage based on the debugging value you discover. Focus on scenarios where traditional logging provides insufficient context about user experience problems, particularly during checkout processes and cart operations where user frustration directly impacts revenue. The sample rate for Sentry session replay can be optimized based on your specific needs, balancing comprehensive monitoring with data volume considerations.
 
-![Screenshot of Sentry Performance dashboard showing the slow cart update request with timing information and database query details](images/cart-performance-trace.png)
-
-The performance trace shows the cascade of slow operations that lead to poor user experience. You can see the initial user action, the delayed database query, and the subsequent UI updates all connected in a single view. This distributed tracing capability is essential for understanding complex performance issues that span multiple services and operations.
-
-### Mobile Session Replay for Performance Issues
-
-Sentry's mobile session replay capabilities through React Native provide the same unified experience for users accessing your ecommerce store through mobile apps. Performance issues often feel even more frustrating on mobile devices where users expect instant responsiveness.
-
-![Screenshot of Sentry mobile session replay showing cart update performance issues on a mobile device interface](images/mobile-session-replay-performance.png)
-
-Mobile session replay captures touch interactions, device orientation changes, and app lifecycle events alongside performance data, giving you complete context about how database slowness affects mobile users specifically. The tool to replay user sessions in web browser and mobile environments provides consistent debugging capabilities across all platforms where customers interact with your store.
-
-### AI-Powered Performance Optimization
-
-Sentry's AI-powered assistant, Seer, analyzes performance patterns across multiple sessions and provides specific recommendations for optimizing database operations and user experience during slow operations.
-
-![Screenshot of Sentry Seer AI interface showing recommendations for the cart performance issue, including database optimization suggestions and user experience improvements](images/seer-performance-recommendations.png)
-
-Seer's recommendations combine technical database optimizations with user experience improvements. The AI suggests implementing optimistic UI updates that make interfaces feel responsive during slow operations, adding proper loading states that keep users informed, and optimizing database queries to reduce actual response times. These suggestions come from analyzing user behavior patterns across multiple session replays and identifying what keeps users engaged during performance delays.
-
-The AI recognizes specific patterns in the session replay data:
-- Users abandon operations when progress indicators are unclear
-- Optimistic UI updates reduce perceived performance issues
-- Clear progress communication improves user patience during slow operations
-
-## The unified advantage: connecting session replay with complete monitoring
-
-These scenarios demonstrate why session replay technology becomes exponentially more valuable when integrated with performance monitoring and error tracking in a unified platform. Traditional approaches that require separate tools for user session replay software, performance analysis, and error investigation force you to manually correlate data across different systems, often leading to incomplete understanding of user experience problems.
-
-When a customer reports that "checkout doesn't work," separate monitoring tools would require you to check session recording in one system, look up performance data in another platform, and search for related errors in a third tool. This process is time-consuming and often misses critical connections between different types of issues.
-
-Sentry's integrated approach automatically links session replays with performance traces and error information, eliminating the context switching that makes ecommerce debugging so challenging. When you're investigating a performance issue, you can immediately see the associated user session replay. When viewing an error, you can jump directly to watching how users experienced that error. This seamless integration accelerates debugging and ensures you never miss important context.
-
-The unified platform also enables more sophisticated analysis that wouldn't be possible with separate tools. You can identify patterns where specific performance issues consistently lead to user abandonment, or where certain error conditions correlate with increased support ticket volume. This type of analysis helps you prioritize fixes based on actual business impact rather than just technical severity.
-
-Session replay software technology continues to evolve with capabilities like automatic issue detection, predictive analytics, and deeper integration with development workflows. Sentry's platform approach ensures you can take advantage of these advances without having to integrate multiple new tools or rebuild your monitoring infrastructure.
-
-Mobile session replay support through React Native provides the same unified experience across all platforms where customers interact with your ecommerce application. Whether users encounter problems on web browsers or mobile apps, the debugging experience remains consistent, with session replay data automatically integrated with performance and error information.
-
-The sample rate for Sentry session replay can be optimized based on your specific needs, balancing comprehensive monitoring with data volume and cost considerations. Many ecommerce teams start with higher sample rates during development and critical business periods, then adjust based on the debugging value they discover and their ongoing monitoring requirements.
-
-User feedback integration completes the unified monitoring picture by connecting customer reports directly with technical debugging data. When users submit feedback about problems they're experiencing, that feedback is automatically associated with their current session replay, recent errors, and performance data, providing complete context for support and development teams.
-
-## Conclusion
-
-Session replay transforms ecommerce debugging from guesswork into data-driven investigation. By combining visual user experience data with performance monitoring and error tracking, you gain complete context about problems that affect your customers' shopping experience, enabling faster resolution and better prevention of similar issues.
-
-The checkout timeout scenario demonstrated how session replay reveals user frustration patterns, error tracking provides technical context about API failures, and user feedback captures customer sentiment—all connected in a single platform. The database performance scenario showed how session replay data connects with performance traces to identify the root cause of slow user experiences, while AI recommendations provide actionable next steps based on actual user behavior patterns.
-
-Start implementing session replay on your most critical user flows, then expand coverage based on the debugging value you discover. Focus on scenarios where traditional logging provides insufficient context about user experience problems, particularly during checkout processes and cart operations where user frustration directly impacts revenue.
-
-When users report problems with your ecommerce application, Sentry's unified platform lets you immediately see exactly what they experienced and identify the technical root cause, leading to faster fixes and better customer experiences.
+When users report problems with your ecommerce application, you'll immediately see exactly what they experienced and identify the technical root cause, leading to faster fixes and better customer experiences.
 
 ## Further Reading
 
